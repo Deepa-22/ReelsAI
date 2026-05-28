@@ -1,56 +1,86 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOpenAI } from '@/lib/openai';
 
+// Try models in order of quality (best → fallback). Whichever your account
+// has access to wins. Different models support different sizes.
+const MODEL_CHAIN: { model: string; size: string; maxPromptLen: number }[] = [
+  { model: 'gpt-image-1', size: '1024x1536', maxPromptLen: 3900 }, // newest, portrait
+  { model: 'dall-e-3',    size: '1024x1792', maxPromptLen: 3900 }, // best classic
+  { model: 'dall-e-2',    size: '1024x1024', maxPromptLen: 1000 }, // works everywhere, square
+];
+
 export async function POST(req: NextRequest) {
-  let body: { prompt: string; size?: '1024x1792' | '1792x1024' | '1024x1024' };
+  let body: { prompt: string };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: 'Invalid request body' }, { status: 400 }); }
 
-  const { prompt, size = '1024x1792' } = body;   // vertical default
-
+  const { prompt } = body;
   if (!prompt || prompt.trim().length < 10) {
     return NextResponse.json({ error: 'Prompt too short' }, { status: 400 });
   }
 
-  try {
-    const openai = getOpenAI();
+  const openai = getOpenAI();
+  const errors: string[] = [];
 
-    // Trim prompt to DALL-E 3 max length (4000 chars)
-    const trimmedPrompt = prompt.slice(0, 3900);
+  for (const cfg of MODEL_CHAIN) {
+    try {
+      const trimmedPrompt = prompt.slice(0, cfg.maxPromptLen);
 
-    const response = await openai.images.generate({
-      model: 'dall-e-3',
-      prompt: trimmedPrompt,
-      n: 1,
-      size,
-      quality: 'standard',      // 'standard' = $0.04, 'hd' = $0.08 per image
-      style: 'vivid',           // vivid colours pop more for social
-      response_format: 'b64_json',
-    });
+      // Minimal params — only what every model accepts
+      const response = await openai.images.generate({
+        model: cfg.model,
+        prompt: trimmedPrompt,
+        n: 1,
+        size: cfg.size as '1024x1024' | '1024x1536' | '1024x1792' | '512x512' | '256x256',
+      });
 
-    const b64 = response.data?.[0]?.b64_json;
-    if (!b64) throw new Error('No image returned');
+      const data = response.data?.[0];
+      if (!data) throw new Error('Empty data array');
 
-    const dataUrl = `data:image/png;base64,${b64}`;
-    return NextResponse.json({
-      imageUrl: dataUrl,
-      revisedPrompt: response.data?.[0]?.revised_prompt,
-    });
+      let dataUrl: string;
+      if (data.b64_json) {
+        dataUrl = `data:image/png;base64,${data.b64_json}`;
+      } else if (data.url) {
+        const imgRes = await fetch(data.url);
+        if (!imgRes.ok) throw new Error(`fetch ${imgRes.status}`);
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+        dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+      } else {
+        throw new Error('No image data');
+      }
 
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.error('[generate-image] Error:', errMsg);
+      return NextResponse.json({
+        imageUrl: dataUrl,
+        modelUsed: cfg.model,
+        revisedPrompt: data.revised_prompt,
+      });
 
-    const isQuota = errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('billing');
-    const isModeration = errMsg.includes('safety') || errMsg.includes('moderation') || errMsg.includes('400');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${cfg.model}: ${msg.slice(0, 90)}`);
+      console.warn(`[generate-image] ${cfg.model} failed — trying next:`, msg.slice(0, 120));
 
-    return NextResponse.json({
-      error: isQuota
-        ? 'OpenAI quota exceeded — add credits to continue'
-        : isModeration
-          ? 'Image prompt was rejected by safety filter. Try rephrasing.'
-          : 'Image generation failed. Please try again.',
-      _debug: process.env.NODE_ENV === 'development' ? errMsg : undefined,
-    }, { status: 500 });
+      // Hard stops — don't keep trying for these
+      if (/quota|insufficient_quota|billing/i.test(msg)) {
+        return NextResponse.json({
+          error: 'OpenAI quota exceeded — add credits to continue',
+          _debug: msg,
+        }, { status: 500 });
+      }
+      if (/safety|content_policy|content policy/i.test(msg)) {
+        return NextResponse.json({
+          error: 'Image prompt blocked by safety filter. Try a softer description.',
+          _debug: msg,
+        }, { status: 500 });
+      }
+      // Otherwise — try next model
+    }
   }
+
+  // All models failed
+  console.error('[generate-image] All models failed:', errors);
+  return NextResponse.json({
+    error: 'No supported image model on your account. Try verifying your phone number at platform.openai.com.',
+    _debug: errors.join(' | '),
+  }, { status: 500 });
 }
