@@ -17,7 +17,8 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useCreateReelStore } from '@/lib/store';
 import { v4 as uuidv4 } from 'uuid';
-import { renderCinematicReel, type Category, type Mood } from '@/lib/cinematic-renderer';
+import { renderCinematicReel, type Category, type Mood, type AISceneData } from '@/lib/cinematic-renderer';
+import type { AIStoryAnalysis } from '@/app/api/ai/analyze-photos/route';
 import PreviewModal from '@/components/create/PreviewModal';
 
 const CATEGORIES = [
@@ -97,9 +98,10 @@ export default function CreateReelPage() {
   const [viralScore, setViralScore] = useState(0);
   const [showPreview, setShowPreview]  = useState(false);
   const [renderPhase, setRenderPhase]  = useState<'analyzing'|'rendering'>('analyzing');
-  const [aiScenes, setAiScenes]        = useState<import('@/lib/cinematic-renderer').AISceneData[] | undefined>(undefined);
+  const [aiScenes, setAiScenes]        = useState<AISceneData[] | undefined>(undefined);
   const [ctaText, setCtaText]          = useState('');
   const [hashtags, setHashtags]        = useState<string[]>([]);
+  const [usedRealAI, setUsedRealAI]    = useState(false);
 
   const onDrop = useCallback((accepted: File[]) => {
     const newFiles = accepted.slice(0, 20 - files.length).map((file, i) => ({
@@ -137,6 +139,7 @@ export default function CreateReelPage() {
     setRenderStatus('rendering');
     setRenderProgress(0);
     setRenderPhase('analyzing');
+    setUsedRealAI(false);
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(null);
     setVideoBlob(null);
@@ -144,7 +147,8 @@ export default function CreateReelPage() {
 
     try {
       // ── Phase 1: AI Vision Analysis ──────────────────────────────────
-      let analysisResult: import('@/app/api/ai/analyze-photos/route').AIStoryAnalysis | null = null;
+      let analysisResult: AIStoryAnalysis | null = null;
+      let aiUsed = false;
       try {
         // Convert first 6 images to base64 (cost/speed balance)
         const base64Images = await Promise.all(
@@ -163,6 +167,7 @@ export default function CreateReelPage() {
         if (res.ok) {
           const data = await res.json();
           analysisResult = data.analysis;
+          aiUsed = data.aiUsed === true;
         }
       } catch (aiErr) {
         console.warn('AI analysis failed, using fallback:', aiErr);
@@ -177,6 +182,13 @@ export default function CreateReelPage() {
       setViralScore(finalScore);
       setHashtags(analysisResult?.suggestedHashtags || []);
       setAiScenes(analysisResult?.scenes);
+      setUsedRealAI(aiUsed);
+
+      if (aiUsed) {
+        toast.success('🧠 GPT-4 Vision analysed your photos!', { duration: 3000 });
+      } else {
+        toast('📸 Using smart defaults (add OPENAI_API_KEY for full AI)', { icon: 'ℹ️', duration: 4000 });
+      }
 
       // ── Phase 2: Cinematic Render ────────────────────────────────────
       setRenderPhase('rendering');
@@ -538,6 +550,11 @@ export default function CreateReelPage() {
                     className="text-5xl mx-auto w-fit">🎬</motion.div>
                   <h2 className="text-2xl font-bold text-white">Your cinematic reel is ready!</h2>
                   <p className="text-white/50 text-sm">Made from {files.filter(f => f.type === 'image').length} photos · {config.duration}s · {config.mood?.replace('_',' ')}</p>
+                  <div className="flex justify-center">
+                    <Badge variant={usedRealAI ? 'default' : 'secondary'} className="text-xs gap-1">
+                      {usedRealAI ? <><Sparkles className="h-3 w-3" /> GPT-4 Vision powered</> : <>📸 Smart defaults used</>}
+                    </Badge>
+                  </div>
                 </div>
 
                 {/* ── Inline video preview ── */}
