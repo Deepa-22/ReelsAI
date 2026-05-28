@@ -1,0 +1,344 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  name          String?
+  avatarUrl     String?
+  plan          Plan           @default(FREE)
+  credits       Int            @default(3)
+  referralCode  String         @unique @default(cuid())
+  referredBy    String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  subscription  Subscription?
+  projects      Project[]
+  exports       Export[]
+  analytics     Analytics[]
+  referrals     Referral[]     @relation("referrer")
+  referred      Referral?      @relation("referred")
+  notifications Notification[]
+  teamMembers   TeamMember[]
+  brandKits     BrandKit[]
+
+  @@map("users")
+}
+
+model Subscription {
+  id                     String             @id @default(cuid())
+  userId                 String             @unique
+  plan                   Plan               @default(FREE)
+  status                 SubscriptionStatus @default(ACTIVE)
+  stripeCustomerId       String?
+  stripeSubscriptionId   String?
+  razorpaySubscriptionId String?
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean            @default(false)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  user                   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  category    Category
+  mood        Mood
+  status      ProjectStatus @default(DRAFT)
+  thumbnail   String?
+  duration    Int?
+  isPublic    Boolean       @default(false)
+  viewCount   Int           @default(0)
+  likeCount   Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  uploads     Upload[]
+  reels       Reel[]
+  exports     Export[]
+
+  @@map("projects")
+}
+
+model Upload {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  fileName  String
+  fileType  FileType
+  fileSize  Int
+  url       String
+  cdnUrl    String?
+  order     Int      @default(0)
+  metadata  Json?
+  createdAt DateTime @default(now())
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("uploads")
+}
+
+model Reel {
+  id               String     @id @default(cuid())
+  projectId        String
+  userId           String
+  title            String
+  status           ReelStatus @default(QUEUED)
+  videoUrl         String?
+  thumbnailUrl     String?
+  duration         Int?
+  resolution       String?
+  hasWatermark     Boolean    @default(true)
+  script           String?
+  voiceover        String?
+  subtitles        Json?
+  musicTrack       String?
+  transitions      Json?
+  colorGrade       String?
+  aiScore          Float?
+  engagementScore  Float?
+  viralityScore    Float?
+  renderProgress   Int        @default(0)
+  renderError      String?
+  renderStartedAt  DateTime?
+  renderFinishedAt DateTime?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  project          Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  exports          Export[]
+
+  @@map("reels")
+}
+
+model Export {
+  id        String       @id @default(cuid())
+  userId    String
+  projectId String
+  reelId    String
+  platform  Platform
+  format    String
+  quality   Quality
+  url       String?
+  fileSize  Int?
+  status    ExportStatus @default(PENDING)
+  createdAt DateTime     @default(now())
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  reel      Reel         @relation(fields: [reelId], references: [id], onDelete: Cascade)
+
+  @@map("exports")
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  category    Category
+  mood        Mood
+  thumbnail   String
+  previewUrl  String?
+  config      Json
+  tags        String[]
+  isPremium   Boolean  @default(false)
+  useCount    Int      @default(0)
+  rating      Float    @default(0)
+  isTrending  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("templates")
+}
+
+model Analytics {
+  id         String   @id @default(cuid())
+  userId     String
+  event      String
+  properties Json?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("analytics")
+}
+
+model Referral {
+  id         String         @id @default(cuid())
+  referrerId String
+  referredId String         @unique
+  status     ReferralStatus @default(PENDING)
+  reward     Float?
+  createdAt  DateTime       @default(now())
+  referrer   User           @relation("referrer", fields: [referrerId], references: [id], onDelete: Cascade)
+  referred   User           @relation("referred", fields: [referredId], references: [id], onDelete: Cascade)
+
+  @@map("referrals")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  data      Json?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model Team {
+  id        String       @id @default(cuid())
+  name      String
+  ownerId   String
+  plan      Plan         @default(BUSINESS)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  members   TeamMember[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  id       String   @id @default(cuid())
+  teamId   String
+  userId   String
+  role     TeamRole @default(MEMBER)
+  joinedAt DateTime @default(now())
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@map("team_members")
+}
+
+model BrandKit {
+  id             String   @id @default(cuid())
+  userId         String
+  name           String
+  logoUrl        String?
+  primaryColor   String?
+  secondaryColor String?
+  fontFamily     String?
+  watermarkUrl   String?
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("brand_kits")
+}
+
+enum Plan {
+  FREE
+  PRO
+  BUSINESS
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  TRIALING
+  INCOMPLETE
+}
+
+enum ProjectStatus {
+  DRAFT
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ReelStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ExportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum FileType {
+  IMAGE
+  VIDEO
+  AUDIO
+}
+
+enum Platform {
+  INSTAGRAM
+  TIKTOK
+  YOUTUBE
+  WHATSAPP
+  DOWNLOAD
+}
+
+enum Quality {
+  SD
+  HD
+  FHD
+  UHD
+}
+
+enum Category {
+  COOKING
+  TRAVEL
+  BABY
+  WEDDING
+  PETS
+  FASHION
+  FOOD_BUSINESS
+  CAFE
+  FITNESS
+  PRODUCT
+  REAL_ESTATE
+  FESTIVAL
+  BIRTHDAY
+  COUPLE
+  LUXURY
+  VLOG
+  OTHER
+}
+
+enum Mood {
+  CINEMATIC
+  EMOTIONAL
+  LUXURY
+  COZY
+  VIRAL
+  FAST_PACED
+  DREAMY
+  RETRO
+  MINIMAL
+  DOCUMENTARY
+  AESTHETIC
+}
+
+enum ReferralStatus {
+  PENDING
+  COMPLETED
+  REWARDED
+}
+
+enum TeamRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
