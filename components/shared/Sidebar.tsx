@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Sparkles, LayoutDashboard, FolderOpen, Plus, Wand2,
+  Sparkles, LayoutDashboard, FolderOpen, Plus, Wand2, BookOpen,
   Settings, CreditCard, BarChart2, Gift, HelpCircle,
   ChevronLeft, ChevronRight, LogOut, Zap
 } from 'lucide-react';
@@ -16,9 +16,10 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 
-const NAV_ITEMS = [
+const NAV_ITEMS: Array<{ href: string; label: string; icon: typeof Plus; highlight?: boolean; badge?: string }> = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/create', label: 'Create Reel', icon: Plus, highlight: true },
+  { href: '/story', label: 'Story Mode', icon: BookOpen, badge: 'NEW' },
   { href: '/projects', label: 'My Projects', icon: FolderOpen },
   { href: '/ai-studio', label: 'AI Studio', icon: Wand2 },
   { href: '/analytics', label: 'Analytics', icon: BarChart2 },
@@ -98,7 +99,12 @@ export default function Sidebar() {
                     </motion.span>
                   )}
                 </AnimatePresence>
-                {active && sidebarOpen && (
+                {item.badge && sidebarOpen && (
+                  <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-gradient-to-br from-violet-500 to-pink-500 text-white">
+                    {item.badge}
+                  </span>
+                )}
+                {active && sidebarOpen && !item.badge && (
                   <div className="ml-auto h-1.5 w-1.5 rounded-full bg-violet-400" />
                 )}
               </div>

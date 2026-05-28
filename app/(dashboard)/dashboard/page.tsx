@@ -95,6 +95,42 @@ export default function DashboardPage() {
         ))}
       </div>
 
+      {/* Story Mode CTA — NEW */}
+      <Link href="/story">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          whileHover={{ scale: 1.01 }}
+          className="relative overflow-hidden glass-card rounded-3xl p-6 cursor-pointer hover:border-violet-500/40 transition-all"
+          style={{
+            background: 'linear-gradient(135deg, rgba(139,92,246,0.15) 0%, rgba(236,72,153,0.10) 100%)',
+            border: '1px solid rgba(139,92,246,0.3)',
+          }}
+        >
+          <div className="absolute top-0 right-0 w-64 h-64 bg-pink-600/10 rounded-full blur-3xl" />
+          <div className="absolute top-0 left-0 w-64 h-64 bg-violet-600/15 rounded-full blur-3xl" />
+          <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
+            <div className="flex items-center gap-4">
+              <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-600 to-pink-600 flex items-center justify-center shadow-[0_0_30px_rgba(139,92,246,0.5)] shrink-0">
+                <Sparkles className="h-7 w-7 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-lg sm:text-xl font-bold text-white">Story Mode</h3>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gradient-to-br from-violet-500 to-pink-500 text-white">NEW</span>
+                </div>
+                <p className="text-sm text-white/70 max-w-md">
+                  Type a storyline · AI generates custom character + 6 scenes + narration · No photos needed
+                </p>
+              </div>
+            </div>
+            <Button variant="gradient" size="sm" className="shrink-0">
+              Try Story Mode <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </motion.div>
+      </Link>
+
       {/* Quick Actions */}
       <div>
         <h3 className="text-lg font-semibold text-white mb-4">Quick Create</h3>
