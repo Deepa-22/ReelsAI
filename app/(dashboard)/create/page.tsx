@@ -17,7 +17,7 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useCreateReelStore } from '@/lib/store';
 import { v4 as uuidv4 } from 'uuid';
-import { renderCinematicReel, type Category, type Mood, type AISceneData } from '@/lib/cinematic-renderer';
+import { renderCinematicReel, type Category, type Mood, type AISceneData, type AICreativeBrief } from '@/lib/cinematic-renderer';
 import type { AIStoryAnalysis } from '@/app/api/ai/analyze-photos/route';
 import PreviewModal from '@/components/create/PreviewModal';
 
@@ -102,6 +102,7 @@ export default function CreateReelPage() {
   const [ctaText, setCtaText]          = useState('');
   const [hashtags, setHashtags]        = useState<string[]>([]);
   const [usedRealAI, setUsedRealAI]    = useState(false);
+  const [brief, setBrief]              = useState<AICreativeBrief | undefined>(undefined);
 
   const onDrop = useCallback((accepted: File[]) => {
     const newFiles = accepted.slice(0, 20 - files.length).map((file, i) => ({
@@ -144,6 +145,7 @@ export default function CreateReelPage() {
     setVideoUrl(null);
     setVideoBlob(null);
     setAiScenes(undefined);
+    setBrief(undefined);
 
     try {
       // ── Phase 1: AI Vision Analysis ──────────────────────────────────
@@ -182,6 +184,7 @@ export default function CreateReelPage() {
       setViralScore(finalScore);
       setHashtags(analysisResult?.suggestedHashtags || []);
       setAiScenes(analysisResult?.scenes);
+      setBrief(analysisResult?.brief);
       setUsedRealAI(aiUsed);
 
       if (aiUsed) {
@@ -211,6 +214,7 @@ export default function CreateReelPage() {
         title: analysisResult?.title || config.title || 'My Story',
         ctaText: finalCta,
         aiScenes: analysisResult?.scenes,
+        brief: analysisResult?.brief,
         onProgress: setRenderProgress,
       });
 
@@ -595,6 +599,61 @@ export default function CreateReelPage() {
                       <p className="text-white text-sm font-medium leading-relaxed">"{hook}"</p>
                     </div>
 
+                    {/* ── AI Creative Brief — what the AI imagined ── */}
+                    {brief && (
+                      <div className="glass-card rounded-xl p-4 space-y-3" style={{
+                        background: brief.palette ? `linear-gradient(135deg, ${brief.palette.primary}22 0%, ${brief.palette.secondary}11 100%)` : undefined,
+                        border: brief.palette ? `1px solid ${brief.palette.primary}40` : undefined,
+                      }}>
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-4 w-4" style={{ color: brief.palette?.primary }} />
+                          <div className="text-xs font-semibold text-white/70 uppercase tracking-wider">AI Creative Direction</div>
+                        </div>
+
+                        {brief.creativeConcept && (
+                          <p className="text-sm text-white/80 italic leading-relaxed">
+                            "{brief.creativeConcept}"
+                          </p>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          {brief.visualStyle && (
+                            <div>
+                              <div className="text-white/40 mb-1">Visual style</div>
+                              <div className="text-white/85 capitalize">{brief.visualStyle.replace(/-/g, ' ')}</div>
+                            </div>
+                          )}
+                          {brief.musicVibe && (
+                            <div>
+                              <div className="text-white/40 mb-1">Music vibe</div>
+                              <div className="text-white/85">{brief.musicVibe}</div>
+                            </div>
+                          )}
+                        </div>
+
+                        {brief.palette && (
+                          <div>
+                            <div className="text-white/40 text-xs mb-1.5">Custom palette AI chose</div>
+                            <div className="flex gap-1.5">
+                              {[brief.palette.primary, brief.palette.secondary, brief.palette.overlay, brief.palette.shadow].map((c, i) => (
+                                <div key={i} className="h-7 w-7 rounded-lg border border-white/20 shadow-sm" style={{ background: c }} title={c} />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {brief.particles?.emojis && brief.particles.emojis.length > 0 && (
+                          <div className="flex items-center gap-2">
+                            <div className="text-white/40 text-xs">Particle FX:</div>
+                            <div className="text-xl">{brief.particles.emojis.join(' ')}</div>
+                            <div className="text-white/50 text-xs">
+                              {brief.particles.behaviour} · {brief.particles.density}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* What the AI did */}
                     <div className="glass-card rounded-xl p-4 space-y-2">
                       <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">AI analysed & applied</div>
@@ -602,8 +661,9 @@ export default function CreateReelPage() {
                         aiScenes ? `✅ Story re-ordered (${aiScenes.length} scenes)` : '✅ Ken Burns per scene',
                         aiScenes ? '✅ Scene-specific text from vision AI' : `✅ ${config.category} colour grade`,
                         aiScenes ? '✅ AI-chosen transitions per cut' : '✅ Cinematic transitions',
-                        '✅ Cinematic colour grade + particles',
-                        aiScenes ? '✅ AI narration subtitles' : '✅ Story beat overlays',
+                        brief?.palette ? '✅ AI-chosen colour palette' : '✅ Cinematic colour grade',
+                        brief?.particles ? `✅ AI-chosen particles ${brief.particles.emojis?.join('') || ''}` : '✅ Particle effects',
+                        aiScenes ? '✅ Per-scene lighting effects' : '✅ Mood lighting',
                       ].map(f => (
                         <div key={f} className="text-xs text-white/60">{f}</div>
                       ))}

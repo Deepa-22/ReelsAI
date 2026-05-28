@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { AISceneData } from '@/lib/cinematic-renderer';
+import type { AISceneData, AICreativeBrief } from '@/lib/cinematic-renderer';
 import { getOpenAI } from '@/lib/openai';
 
 export interface AIStoryAnalysis {
@@ -7,101 +7,70 @@ export interface AIStoryAnalysis {
   hook: string;
   ctaText: string;
   scenes: AISceneData[];
+  brief: AICreativeBrief;
   overallMood: string;
   viralScore: number;
   suggestedHashtags: string[];
-  colorGradeHint: string;
 }
 
-// ── Smart fallbacks per category ────────────────────────────────────────────
+// ── Smart fallback (only used when no OpenAI key or call fails) ────────────────
 
-const CATEGORY_DEFAULTS: Record<string, {
-  beats: string[];
-  hooks: string[];
-  cta: string;
-  hashtags: string[];
-}> = {
-  COOKING: {
-    beats: ['Fresh ingredients 🥚', 'Prepping the base 🔪', 'The magic begins 🔥', 'Almost ready ✨', 'The final reveal 🍽️'],
-    hooks: ['You have to try this recipe 🍝✨', 'I made this from scratch and wow 😍', 'The secret ingredient changes everything 🤫'],
-    cta: 'Recipe in bio 👇',
-    hashtags: ['#cooking', '#homemade', '#recipe', '#foodie', '#reels'],
-  },
-  TRAVEL: {
-    beats: ['The journey begins ✈️', 'First impressions 👀', 'Hidden gems 💎', 'Golden hour 🌅', 'Memories forever 🌍'],
-    hooks: ['This place doesn\'t look real 😱', 'You need to visit this ASAP ✈️', 'The most beautiful place I\'ve ever seen 🌍'],
-    cta: 'Save for your next trip 🗺️',
-    hashtags: ['#travel', '#wanderlust', '#travelvlog', '#explore', '#reels'],
-  },
-  WEDDING: {
-    beats: ['The little details 💐', 'Getting ready ✨', 'The big moment 💍', 'Pure emotion 😭', 'Forever begins 💑'],
-    hooks: ['The most beautiful day of our lives 💒', 'I cried watching this back 😭', 'This is what forever looks like 💍'],
-    cta: 'Tag your person 💕',
-    hashtags: ['#wedding', '#bride', '#weddingday', '#love', '#reels'],
-  },
-  PETS: {
-    beats: ['Meet the star 🐾', 'Playtime begins 🎾', 'Too cute 🥹', 'That face tho 😂', 'Pure love ❤️'],
-    hooks: ['This little one owns my whole heart 🐾', 'The way they look at me 🥹😭', 'I cannot with how cute this is 😍'],
-    cta: 'Follow for daily cuteness 🐾',
-    hashtags: ['#pets', '#dogsofinstagram', '#catsofinstagram', '#cutepets', '#reels'],
-  },
-  FITNESS: {
-    beats: ['The grind starts 💪', 'Push through 🔥', 'No limits ⚡', 'Feel the burn 🏋️', 'Results speak 🏆'],
-    hooks: ['The transformation you didn\'t see coming 💪', 'This workout changed my body 🔥', 'No more excuses after this ⚡'],
-    cta: 'Save this workout 💪',
-    hashtags: ['#fitness', '#workout', '#gym', '#fitnessmotivation', '#reels'],
-  },
-  BABY: {
-    beats: ['Tiny moments 👶', 'First discoveries 🌟', 'Pure joy 😍', 'Milestone achieved ✨', 'Forever in my heart 💕'],
-    hooks: ['They grow up too fast 😭💕', 'This moment I never want to forget 👶✨', 'The cutest human alive, fight me 😍'],
-    cta: 'Save this forever 💕',
-    hashtags: ['#baby', '#momlife', '#newborn', '#babymilestone', '#reels'],
-  },
-  CAFE: {
-    beats: ['Good morning vibes ☕', 'The craft ✨', 'Details matter 🌿', 'Perfect cup 😍', 'Come visit us 📍'],
-    hooks: ['The vibe in here hits different ☕✨', 'Your new favourite spot 📍', 'This is what mornings should feel like ☀️'],
-    cta: 'Visit us this week 📍',
-    hashtags: ['#cafe', '#coffee', '#coffeeshop', '#barista', '#reels'],
-  },
-  LUXURY: {
-    beats: ['The arrival ✨', 'Every detail 👑', 'The experience 🥂', 'Pure indulgence 💎', 'This is living 🌟'],
-    hooks: ['This is what luxury really looks like ✨', 'Treating myself and I deserve it 👑', 'The details here are insane 💎'],
-    cta: 'Save for your dream trip 💎',
-    hashtags: ['#luxury', '#lifestyle', '#travel', '#luxurytravel', '#reels'],
-  },
-  DEFAULT: {
-    beats: ['The beginning ✨', 'Building up 🔥', 'The key moment 💫', 'The reveal 🌟', 'That\'s a wrap ❤️'],
-    hooks: ['You have to see how this turned out ✨', 'I can\'t believe this came together 🔥', 'Wait for the ending 😍'],
-    cta: 'Save this! 🔖',
-    hashtags: ['#reels', '#viral', '#trending', '#fyp'],
-  },
+const FALLBACK_CHARACTERS: Record<string, string[]> = {
+  COOKING: ['🍝', '✨', '🔥'], TRAVEL: ['✈️', '🌴', '☀️'], WEDDING: ['💍', '💕', '🥂'],
+  PETS: ['🐾', '❤️', '✨'],   FITNESS: ['💪', '🔥', '⚡'],   BABY: ['👶', '💕', '🌟'],
+  CAFE: ['☕', '🌿', '✨'],     LUXURY: ['👑', '💎', '✨'],    BIRTHDAY: ['🎂', '🎉', '🎁'],
+  FASHION: ['👗', '✨', '💃'],  REAL_ESTATE: ['🏠', '✨', '🔑'], FESTIVAL: ['🎉', '🎊', '✨'],
+  COUPLE: ['💑', '💕', '🌹'],  VLOG: ['🎬', '✨', '📸'],       FOOD_BUSINESS: ['🍔', '🔥', '😋'],
+};
+
+const FALLBACK_PALETTES: Record<string, AICreativeBrief['palette']> = {
+  COOKING: { primary: '#ff8c42', secondary: '#ffd166', overlay: '#1a0a05', shadow: '#0a0503' },
+  TRAVEL:  { primary: '#4ecdc4', secondary: '#ff6b6b', overlay: '#0a1a2a', shadow: '#020a14' },
+  WEDDING: { primary: '#f7cad0', secondary: '#fae1dd', overlay: '#1a0a15', shadow: '#0a0408' },
+  PETS:    { primary: '#ffd166', secondary: '#ef476f', overlay: '#1a0f05', shadow: '#0a0703' },
+  FITNESS: { primary: '#00f5d4', secondary: '#9b5de5', overlay: '#001a14', shadow: '#000a08' },
+  BABY:    { primary: '#fcd5ce', secondary: '#f8edeb', overlay: '#1a0f0f', shadow: '#0a0707' },
+  LUXURY:  { primary: '#d4af37', secondary: '#bf9b30', overlay: '#1a1305', shadow: '#0a0703' },
+  CAFE:    { primary: '#c69e6e', secondary: '#8b5a3c', overlay: '#1a0f08', shadow: '#0a0703' },
+  DEFAULT: { primary: '#8b5cf6', secondary: '#ec4899', overlay: '#0a0518', shadow: '#04020a' },
 };
 
 const TRANSITIONS: AISceneData['transition'][] = ['dissolve', 'zoom-punch', 'slide-left', 'blur-out', 'light-leak', 'dissolve'];
 const KB_STYLES: AISceneData['kenBurnsStyle'][] = ['zoom-in', 'pan-right', 'zoom-out', 'pan-up', 'zoom-in', 'pan-left'];
+const LIGHTING: AISceneData['lightingEffect'][] = ['soft-glow', 'light-leak', 'sparkle-burst', 'lens-flare', 'color-flash'];
 
 function buildFallbackAnalysis(count: number, category: string, mood: string): AIStoryAnalysis {
-  const def = CATEGORY_DEFAULTS[category] || CATEGORY_DEFAULTS.DEFAULT;
-  const hook = def.hooks[Math.floor(Math.random() * def.hooks.length)];
-  const beats = def.beats;
+  const chars = FALLBACK_CHARACTERS[category] || ['✨', '💫', '⭐'];
+  const palette = FALLBACK_PALETTES[category] || FALLBACK_PALETTES.DEFAULT;
 
   return {
     title: `My ${category.charAt(0) + category.slice(1).toLowerCase()} Story`,
-    hook,
-    ctaText: def.cta,
+    hook: `Wait until you see this ✨`,
+    ctaText: 'Save this! 🔖',
     overallMood: mood,
-    viralScore: 78 + Math.floor(Math.random() * 12),
-    suggestedHashtags: def.hashtags,
-    colorGradeHint: category.toLowerCase(),
+    viralScore: 78,
+    suggestedHashtags: [`#${category.toLowerCase()}`, '#reels', '#viral', '#trending', '#fyp'],
+    brief: {
+      palette,
+      particles: { emojis: chars.slice(0, 2), behaviour: 'rise', density: 'medium', speed: 'medium' },
+      visualStyle: 'cinematic-dark',
+      creativeConcept: `${category.toLowerCase()} story with ${mood.toLowerCase()} mood`,
+      musicVibe: 'cinematic',
+    },
     scenes: Array.from({ length: count }, (_, i) => ({
       originalIndex: i,
-      sceneTitle: beats[Math.min(i, beats.length - 1)],
-      narration: i === 0 ? hook : `${beats[Math.min(i, beats.length - 1)].replace(/[^\w\s]/g, '')}...`,
+      sceneTitle: `Scene ${i + 1} ${chars[i % chars.length]}`,
+      narration: `Story moment ${i + 1}`,
       transition: TRANSITIONS[i % TRANSITIONS.length],
       storyBeat: (['intro', 'buildup', 'action', 'climax', 'reveal', 'outro'] as const)[Math.min(i, 5)],
       emotion: 'warm',
-      focusPoint: 'center' as const,
+      focusPoint: 'center',
       kenBurnsStyle: KB_STYLES[i % KB_STYLES.length],
+      characterEmojis: [chars[i % chars.length]],
+      lightingEffect: LIGHTING[i % LIGHTING.length],
+      effectColor: palette!.primary,
+      textStyle: { fontSize: 'md', position: 'bottom', animation: 'slide-up', background: 'pill' },
+      emojiAccent: i === 0 ? chars[0] : undefined,
     })),
   };
 }
@@ -109,7 +78,6 @@ function buildFallbackAnalysis(count: number, category: string, mood: string): A
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  // Parse body FIRST — we reference it in the catch block too
   let body: { images: string[]; category: string; mood: string; title?: string };
   try {
     body = await req.json();
@@ -125,51 +93,103 @@ export async function POST(req: NextRequest) {
 
   try {
     const openai = getOpenAI();
-    const imagesToAnalyze = images.slice(0, 6); // cost/speed balance
+    const imagesToAnalyze = images.slice(0, 6);
 
     const imageContent = imagesToAnalyze.map((b64) => ({
       type: 'image_url' as const,
       image_url: { url: b64, detail: 'low' as const },
     }));
 
-    const systemPrompt = `You are an expert AI video director and viral social media storytelling specialist.
-Analyze the photos and create a cinematic story structure for a vertical reel.
-Always respond with valid JSON only — no markdown, no code fences, just raw JSON.`;
+    const systemPrompt = `You are a world-class AI Creative Director for viral short-form video.
+Your job is NOT to apply templates — your job is to look at the actual photos and IMAGINE the perfect reel.
 
-    const userPrompt = `Analyze these ${imagesToAnalyze.length} photos for a ${category} reel with ${mood} mood.${title ? ` Title: "${title}"` : ''}
+You think like Spike Jonze meets MrBeast meets a Pixar animator. You see the photos as raw material
+and design something genuinely creative, unexpected, and visually exciting.
 
-Photos are indexed 0–${imagesToAnalyze.length - 1} in the order they appear below.
+For every reel you direct:
+1. You IDENTIFY what's actually in each photo (subjects, mood, setting)
+2. You INVENT a creative concept that fits — not a template, an actual idea
+3. You CHOOSE specific colours (hex), emojis (as characters), lighting effects, text styles
+4. You decide scene order, transitions, story arc to maximize emotional impact
+5. Every reel you direct should feel DIFFERENT from every other reel — never formulaic
 
-Return ONLY this JSON (no markdown):
+Reply with valid JSON only — no markdown, no prose, no code fences.`;
+
+    const userPrompt = `Direct a vertical short-form reel from these ${imagesToAnalyze.length} photos.
+
+User chose category: ${category}  (use as guidance, not as a rigid template)
+User chose mood:     ${mood}      (interpret creatively — make it actually feel like this)
+${title ? `User title: "${title}"` : ''}
+
+Photos are indexed 0–${imagesToAnalyze.length - 1} in order shown.
+
+Now look at each photo. What do you actually see? What story would these specific images tell
+if a creative director got hold of them? Be specific. Be inventive. NO generic templates.
+
+Return ONLY this JSON shape:
+
 {
-  "title": "Compelling reel title based on what you actually see",
-  "hook": "Viral hook line max 60 chars — create curiosity or emotion, something they cannot scroll past",
-  "ctaText": "Short call-to-action for last scene e.g. 'Recipe in bio 👇'",
+  "title": "Title that reflects what's actually in the photos",
+  "hook": "Scroll-stopping first 2-second line (max 50 chars)",
+  "ctaText": "Last-scene call to action",
   "overallMood": "${mood}",
-  "viralScore": <integer 70-98>,
-  "suggestedHashtags": ["#tag1","#tag2","#tag3","#tag4","#tag5"],
-  "colorGradeHint": "brief colour grading note e.g. warm golden tones",
+  "viralScore": <integer 75-98>,
+  "suggestedHashtags": ["#5","#to","#8","#trending","#tags"],
+
+  "brief": {
+    "creativeConcept": "<1-sentence description of the reel's creative direction — what makes this reel unique>",
+    "visualStyle": "<one of: cinematic-dark | bright-airy | retro-warm | neon-pop | dreamy-pastel | documentary-natural | luxury-gold | high-energy>",
+    "musicVibe": "<what kind of music — e.g. 'lo-fi cozy beats', 'epic orchestral', 'pop trap', 'acoustic indie folk'>",
+    "palette": {
+      "primary":   "#<hex>  — main accent colour pulled from what you see in the photos",
+      "secondary": "#<hex>  — complementary accent",
+      "overlay":   "#<hex>  — full-screen tint at low alpha, sets the mood",
+      "shadow":    "#<hex>  — vignette shadow colour"
+    },
+    "particles": {
+      "emojis":    ["<2-3 emojis that fit the content>"],
+      "behaviour": "<rise|fall|drift|burst|orbit>",
+      "density":   "<low|medium|high>",
+      "speed":     "<slow|medium|fast>"
+    }
+  },
+
   "scenes": [
     {
-      "originalIndex": <which photo index this is>,
-      "sceneTitle": "<Specific label for THIS exact photo, max 32 chars, with 1 emoji — describe what is ACTUALLY in it>",
-      "narration": "<1–2 sentence voiceover for this scene, conversational and emotional>",
-      "transition": "<dissolve|zoom-punch|slide-left|slide-up|blur-out|light-leak>",
-      "storyBeat": "<intro|buildup|action|climax|reveal|outro>",
-      "emotion": "<warm|exciting|satisfying|peaceful|joyful|dramatic|intimate>",
-      "focusPoint": "<center|top|bottom|left|right>",
-      "kenBurnsStyle": "<zoom-in|zoom-out|pan-left|pan-right|pan-up|pan-down>"
+      "originalIndex": <which photo, 0-based>,
+      "sceneTitle":    "<text overlay describing what's literally in THIS photo (max 30 chars) + 1 emoji>",
+      "narration":     "<1 conversational sentence for this scene's voiceover>",
+      "transition":    "<dissolve|zoom-punch|slide-left|slide-up|blur-out|light-leak>",
+      "storyBeat":     "<intro|buildup|action|climax|reveal|outro>",
+      "emotion":       "<warm|exciting|satisfying|peaceful|joyful|dramatic|intimate>",
+      "focusPoint":    "<center|top|bottom|left|right>",
+      "kenBurnsStyle": "<zoom-in|zoom-out|pan-left|pan-right|pan-up|pan-down>",
+      "characterEmojis":  ["<1-2 emojis that float across this scene>"],
+      "lightingEffect":   "<none|light-leak|soft-glow|color-flash|sparkle-burst|lens-flare>",
+      "effectColor":      "#<hex hue for the lighting effect>",
+      "textStyle": {
+        "fontSize":   "<sm|md|lg|xl>",
+        "position":   "<top|middle|bottom>",
+        "color":      "#<hex>",
+        "background": "<none|pill|highlight>",
+        "animation":  "<fade|slide-up|pop|typewriter|bounce>",
+        "rotation":   <number, degrees, usually 0 but can tilt for energy>
+      },
+      "emojiAccent": "<single emoji to display BIG in scene centre — optional, only when it fits>"
     }
   ]
 }
 
-Rules:
-- Order scenes for best narrative flow — re-order if needed (use originalIndex to track which photo)
-- For COOKING: ingredients first → prep → cooking action → final plated dish
-- For TRAVEL: wide establishing shot first → close details → hero moment last
-- sceneTitle MUST describe what's literally visible in the photo
-- Hook must create FOMO — make them stop scrolling
-- kenBurnsStyle: use zoom-in for hero shots, pan for wide scenes, zoom-out for reveals`;
+CREATIVE RULES — follow these:
+- Don't repeat the same scene structure every reel. Vary text positions, colours, emojis per scene.
+- Match colours to what you ACTUALLY SEE — golden food → warm gold palette; ocean photos → cyan-blue.
+- Pick emojis that aren't obvious. A pasta reel doesn't have to use 🍝 — 🤌 or ✨ might hit harder.
+- For high-energy scenes use rotation, pop animations, color-flash lighting.
+- For emotional scenes use soft-glow, slow narration, intimate text style.
+- Order scenes for best story arc — re-order if the photos arrive in the wrong sequence.
+- Make scene 1 a HOOK — the most arresting image, biggest text, attention-grabbing.
+- Make the final scene a CLIMAX with the CTA.
+- Be specific. Be inventive. Never write "Scene 1" or "Story moment" — describe what's there.`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -177,9 +197,9 @@ Rules:
         { role: 'system', content: systemPrompt },
         { role: 'user', content: [{ type: 'text', text: userPrompt }, ...imageContent] },
       ],
-      max_tokens: 1500,
+      max_tokens: 2500,
       response_format: { type: 'json_object' },
-      temperature: 0.7,
+      temperature: 0.9,   // ← high for creative variety
     });
 
     const raw = response.choices[0].message.content;
@@ -188,7 +208,7 @@ Rules:
     const analysis: AIStoryAnalysis = JSON.parse(raw);
     if (!analysis.scenes?.length) throw new Error('No scenes in AI response');
 
-    // Sanitise — clamp originalIndex to valid range
+    // Sanitise scene indexes
     analysis.scenes = analysis.scenes
       .filter(s => typeof s.originalIndex === 'number')
       .map(s => ({ ...s, originalIndex: Math.max(0, Math.min(s.originalIndex, images.length - 1)) }));
@@ -196,11 +216,14 @@ Rules:
     return NextResponse.json({ analysis, aiUsed: true });
 
   } catch (err) {
-    const isNoKey = err instanceof Error && err.message.includes('OPENAI_API_KEY');
-    if (!isNoKey) console.error('Photo analysis error:', err);
-
-    // Return a smart category-aware fallback — still much better than nothing
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error('[analyze-photos] Error:', errMsg);
     const fallback = buildFallbackAnalysis(images.length, category, mood);
-    return NextResponse.json({ analysis: fallback, aiUsed: false, fallback: true });
+    return NextResponse.json({
+      analysis: fallback,
+      aiUsed: false,
+      fallback: true,
+      _debug: process.env.NODE_ENV === 'development' ? errMsg : undefined,
+    });
   }
 }

@@ -24,6 +24,49 @@ export interface AISceneData {
   emotion: string;
   focusPoint: 'center' | 'top' | 'bottom' | 'left' | 'right';
   kenBurnsStyle: 'zoom-in' | 'zoom-out' | 'pan-left' | 'pan-right' | 'pan-up' | 'pan-down';
+
+  // ── NEW: AI-driven creative direction ─────────────────────────────────
+  /** Animated emoji characters that float/bounce across this scene */
+  characterEmojis?: string[];
+  /** Lighting effect during this scene */
+  lightingEffect?: 'none' | 'light-leak' | 'soft-glow' | 'color-flash' | 'sparkle-burst' | 'lens-flare';
+  /** Hex colour for the flash/glow */
+  effectColor?: string;
+  /** Caption text style overrides for this scene */
+  textStyle?: {
+    fontSize?: 'sm' | 'md' | 'lg' | 'xl';
+    position?: 'top' | 'middle' | 'bottom';
+    color?: string;          // hex
+    background?: 'none' | 'pill' | 'highlight';
+    animation?: 'fade' | 'slide-up' | 'pop' | 'typewriter' | 'bounce';
+    rotation?: number;       // degrees
+  };
+  /** Emoji shown big in the centre as an accent (only for some scenes) */
+  emojiAccent?: string;
+}
+
+/** AI-directed visual brief for the entire reel */
+export interface AICreativeBrief {
+  /** Custom hex colour palette the AI chose for this reel */
+  palette?: {
+    primary: string;      // hex, dominant accent
+    secondary: string;    // hex, secondary accent
+    overlay: string;      // hex, full-screen tint at low alpha
+    shadow: string;       // hex, vignette shadow
+  };
+  /** Custom particle FX — AI picks emojis & behaviour */
+  particles?: {
+    emojis: string[];          // ['🍝', '✨'] etc.
+    behaviour: 'rise' | 'fall' | 'drift' | 'burst' | 'orbit';
+    density: 'low' | 'medium' | 'high';
+    speed: 'slow' | 'medium' | 'fast';
+  };
+  /** Overall visual style of the reel */
+  visualStyle?: 'cinematic-dark' | 'bright-airy' | 'retro-warm' | 'neon-pop' | 'dreamy-pastel' | 'documentary-natural' | 'luxury-gold' | 'high-energy';
+  /** Background music vibe the AI suggests */
+  musicVibe?: string;
+  /** One-line creative concept that describes the reel direction */
+  creativeConcept?: string;
 }
 
 interface RenderOptions {
@@ -34,7 +77,8 @@ interface RenderOptions {
   hook: string;
   title: string;
   ctaText?: string;
-  aiScenes?: AISceneData[];   // ← AI-generated scene data (optional — falls back to generic)
+  aiScenes?: AISceneData[];
+  brief?: AICreativeBrief;
   onProgress: (pct: number) => void;
 }
 
@@ -297,6 +341,191 @@ function applyTransition(
   }
 }
 
+// ─── AI-driven helpers ───────────────────────────────────────────────────────
+
+function hexToRgba(hex: string, alpha: number): string {
+  const m = hex.replace('#', '').match(/.{1,2}/g);
+  if (!m || m.length < 3) return `rgba(0,0,0,${alpha})`;
+  const [r, g, b] = m.map(h => parseInt(h, 16));
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function applyAIGrade(ctx: CanvasRenderingContext2D, cw: number, ch: number, palette: NonNullable<AICreativeBrief['palette']>) {
+  // Overlay tint
+  ctx.fillStyle = hexToRgba(palette.overlay, 0.18);
+  ctx.fillRect(0, 0, cw, ch);
+
+  // Vignette
+  const vig = ctx.createRadialGradient(cw / 2, ch / 2, ch * 0.22, cw / 2, ch / 2, ch * 0.78);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, hexToRgba(palette.shadow, 0.7));
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, cw, ch);
+
+  // Top/bottom mood gradient
+  const top = ctx.createLinearGradient(0, 0, 0, ch * 0.25);
+  top.addColorStop(0, 'rgba(0,0,0,0.45)');
+  top.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = top;
+  ctx.fillRect(0, 0, cw, ch * 0.25);
+
+  const btm = ctx.createLinearGradient(0, ch * 0.65, 0, ch);
+  btm.addColorStop(0, 'rgba(0,0,0,0)');
+  btm.addColorStop(1, hexToRgba(palette.shadow, 0.65));
+  ctx.fillStyle = btm;
+  ctx.fillRect(0, ch * 0.65, cw, ch * 0.35);
+}
+
+// ── AI emoji particle system ────────────────────────────────────────────────
+
+interface EmojiParticle {
+  emoji: string;
+  x: number; y: number;
+  vx: number; vy: number;
+  rotation: number; rotSpeed: number;
+  size: number;
+  life: number; maxLife: number;
+}
+
+function makeEmojiParticles(
+  cw: number, ch: number,
+  emojis: string[],
+  behaviour: 'rise' | 'fall' | 'drift' | 'burst' | 'orbit',
+  density: 'low' | 'medium' | 'high',
+  speed: 'slow' | 'medium' | 'fast'
+): EmojiParticle[] {
+  if (!emojis || emojis.length === 0) return [];
+  const count = density === 'low' ? 6 : density === 'high' ? 16 : 10;
+  const spMul = speed === 'slow' ? 0.5 : speed === 'fast' ? 1.6 : 1;
+
+  return Array.from({ length: count }, () => {
+    const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+    const base: EmojiParticle = {
+      emoji, x: Math.random() * cw, y: Math.random() * ch,
+      vx: 0, vy: 0,
+      rotation: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.04,
+      size: 14 + Math.random() * 18,
+      life: Math.random() * 80, maxLife: 120 + Math.random() * 80,
+    };
+    switch (behaviour) {
+      case 'rise':  base.vy = -(0.5 + Math.random() * 1) * spMul; base.vx = (Math.random() - 0.5) * 0.3; base.y = ch * 0.7 + Math.random() * ch * 0.3; break;
+      case 'fall':  base.vy = (0.5 + Math.random() * 1) * spMul; base.vx = (Math.random() - 0.5) * 0.3; base.y = -20 - Math.random() * 40; break;
+      case 'drift': base.vx = (Math.random() - 0.5) * 0.6 * spMul; base.vy = (Math.random() - 0.5) * 0.6 * spMul; break;
+      case 'burst':
+        const angle = Math.random() * Math.PI * 2;
+        const sp = (0.8 + Math.random() * 1.2) * spMul;
+        base.vx = Math.cos(angle) * sp; base.vy = Math.sin(angle) * sp;
+        base.x = cw / 2; base.y = ch / 2; break;
+      case 'orbit':
+        const oAng = Math.random() * Math.PI * 2;
+        const r = ch * 0.3;
+        base.x = cw / 2 + Math.cos(oAng) * r;
+        base.y = ch / 2 + Math.sin(oAng) * r;
+        base.vx = -Math.sin(oAng) * spMul; base.vy = Math.cos(oAng) * spMul;
+        break;
+    }
+    return base;
+  });
+}
+
+function tickEmojiParticles(ps: EmojiParticle[], cw: number, ch: number, behaviour: string) {
+  for (const p of ps) {
+    p.x += p.vx; p.y += p.vy; p.rotation += p.rotSpeed; p.life++;
+    if (p.life > p.maxLife || p.y < -40 || p.y > ch + 40 || p.x < -40 || p.x > cw + 40) {
+      p.life = 0;
+      if (behaviour === 'rise') { p.y = ch + 10 + Math.random() * 30; p.x = Math.random() * cw; }
+      else if (behaviour === 'fall') { p.y = -10 - Math.random() * 30; p.x = Math.random() * cw; }
+      else { p.x = Math.random() * cw; p.y = Math.random() * ch; }
+    }
+  }
+}
+
+function drawEmojiParticles(ctx: CanvasRenderingContext2D, ps: EmojiParticle[]) {
+  for (const p of ps) {
+    const t = p.life / p.maxLife;
+    const a = t < 0.15 ? t / 0.15 : t > 0.75 ? (1 - t) / 0.25 : 1;
+    if (a <= 0) continue;
+    ctx.save();
+    ctx.globalAlpha = a * 0.85;
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rotation * 0.3);
+    ctx.font = `${p.size}px system-ui, "Apple Color Emoji", "Segoe UI Emoji"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(p.emoji, 0, 0);
+    ctx.restore();
+  }
+}
+
+// ── Lighting effects ────────────────────────────────────────────────────────
+
+function applyLighting(
+  ctx: CanvasRenderingContext2D,
+  cw: number, ch: number,
+  effect: AISceneData['lightingEffect'],
+  color: string,
+  t: number
+) {
+  if (!effect || effect === 'none') return;
+  switch (effect) {
+    case 'light-leak': {
+      const peak = 1 - Math.abs(t - 0.5) * 1.6;
+      if (peak <= 0) return;
+      const g = ctx.createRadialGradient(cw * 0.85, ch * 0.15, 0, cw * 0.85, ch * 0.15, cw * 0.9);
+      g.addColorStop(0, hexToRgba(color, peak * 0.55));
+      g.addColorStop(0.3, hexToRgba(color, peak * 0.25));
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, cw, ch);
+      break;
+    }
+    case 'soft-glow': {
+      const a = 0.18 + Math.sin(t * Math.PI) * 0.12;
+      const g = ctx.createRadialGradient(cw / 2, ch / 2, 0, cw / 2, ch / 2, ch * 0.5);
+      g.addColorStop(0, hexToRgba(color, a));
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, cw, ch);
+      break;
+    }
+    case 'color-flash': {
+      const peak = t < 0.12 ? t / 0.12 : 0;
+      if (peak <= 0) return;
+      ctx.fillStyle = hexToRgba(color, peak * 0.6);
+      ctx.fillRect(0, 0, cw, ch);
+      break;
+    }
+    case 'sparkle-burst': {
+      if (t < 0.4) {
+        const a = 1 - t / 0.4;
+        for (let i = 0; i < 28; i++) {
+          const sx = Math.random() * cw, sy = Math.random() * ch;
+          ctx.beginPath();
+          ctx.arc(sx, sy, 1 + Math.random() * 2, 0, Math.PI * 2);
+          ctx.fillStyle = hexToRgba(color, a * (0.4 + Math.random() * 0.6));
+          ctx.fill();
+        }
+      }
+      break;
+    }
+    case 'lens-flare': {
+      const peak = 1 - Math.abs(t - 0.3) * 1.4;
+      if (peak <= 0) return;
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      const g = ctx.createRadialGradient(cw * 0.7, ch * 0.3, 0, cw * 0.7, ch * 0.3, cw * 0.7);
+      g.addColorStop(0, hexToRgba(color, peak * 0.5));
+      g.addColorStop(0.5, hexToRgba(color, peak * 0.18));
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.restore();
+      break;
+    }
+  }
+}
+
 // ─── Main renderer ────────────────────────────────────────────────────────────
 
 // ─── AI-driven KB preset ─────────────────────────────────────────────────────
@@ -319,7 +548,7 @@ function getAIKenBurns(style: AISceneData['kenBurnsStyle'], focusPoint: AISceneD
 }
 
 export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
-  const { images, category, mood, duration, hook, title, ctaText, aiScenes, onProgress } = opts;
+  const { images, category, mood, duration, hook, title, ctaText, aiScenes, brief, onProgress } = opts;
 
   const CW = 540, CH = 960;
   const FPS = 30;
@@ -331,7 +560,9 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
   canvas.width = CW; canvas.height = CH;
   const ctx = canvas.getContext('2d', { willReadFrequently: false })!;
 
-  const grade = GRADE[category] || GRADE.DEFAULT;
+  // Fallbacks if AI brief is missing
+  const fallbackPalette = { primary: '#8b5cf6', secondary: '#ec4899', overlay: '#0a0518', shadow: '#04020a' };
+  const palette = brief?.palette ?? fallbackPalette;
   const fallbackTransitions = getTransitions(mood);
   const fallbackBeats = STORY_BEATS[category] || STORY_BEATS.DEFAULT;
 
@@ -348,11 +579,14 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
   const n = orderedImages.length;
   const framesPerScene = Math.floor((TOTAL_FRAMES - (n - 1) * TRANS_FRAMES) / n);
 
-  // Particles for this category
-  const useParticles = ['COOKING', 'CAFE', 'FOOD_BUSINESS'].includes(category);
-  const useSparkles = ['WEDDING', 'LUXURY', 'BIRTHDAY', 'FESTIVAL'].includes(category);
-  const particles = useParticles ? makeSteamParticles(CW, CH) :
-                    useSparkles  ? makeSparkles(CW, CH) : [];
+  // ── AI-driven emoji particles (replaces hardcoded steam/sparkle presets) ─
+  const particleEmojis = brief?.particles?.emojis?.filter(Boolean) ?? [];
+  const emojiParticles = particleEmojis.length > 0
+    ? makeEmojiParticles(CW, CH, particleEmojis,
+        brief?.particles?.behaviour ?? 'rise',
+        brief?.particles?.density ?? 'medium',
+        brief?.particles?.speed ?? 'medium')
+    : [];
 
   // Per-scene KB: use AI data or fallback to presets
   const kbs = orderedImages.map((_, i) => {
@@ -390,11 +624,19 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
     drawImageFill(ctx, img, CW, CH);
     ctx.restore();
 
-    // ── Colour grade ────────────────────────────────────────────────
-    applyGrade(ctx, CW, CH, grade);
+    // ── AI-driven colour grade ───────────────────────────────────────
+    applyAIGrade(ctx, CW, CH, palette);
 
-    // ── Particles ───────────────────────────────────────────────────
-    if (particles.length > 0) { tickParticles(particles); drawParticles(ctx, particles); }
+    // ── AI-driven lighting effect for THIS scene ─────────────────────
+    if (aiScene?.lightingEffect && aiScene.lightingEffect !== 'none') {
+      applyLighting(ctx, CW, CH, aiScene.lightingEffect, aiScene.effectColor || palette.primary, t);
+    }
+
+    // ── AI emoji particles (rendered above image) ────────────────────
+    if (emojiParticles.length > 0) {
+      tickEmojiParticles(emojiParticles, CW, CH, brief?.particles?.behaviour ?? 'rise');
+      drawEmojiParticles(ctx, emojiParticles);
+    }
 
     // ── Film grain ──────────────────────────────────────────────────
     if (localFrame % 3 === 0) {
@@ -404,15 +646,75 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
       }
     }
 
+    // ── Big emoji accent (AI-chosen, on scenes where it fits) ────────
+    if (aiScene?.emojiAccent && t > 0.2 && t < 0.7) {
+      const ea = t < 0.32 ? (t - 0.2) / 0.12 : t > 0.55 ? (0.7 - t) / 0.15 : 1;
+      const bounce = Math.sin(t * Math.PI * 3) * 6;
+      ctx.save();
+      ctx.globalAlpha = ea * 0.92;
+      ctx.font = `${Math.round(CW * 0.18)}px system-ui, "Apple Color Emoji", "Segoe UI Emoji"`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = hexToRgba(palette.primary, 0.6);
+      ctx.shadowBlur = 18;
+      ctx.fillText(aiScene.emojiAccent, CW / 2, CH * 0.32 + bounce);
+      ctx.restore();
+    }
+
     // ── Letterbox ───────────────────────────────────────────────────
     drawBars(ctx, CW, CH, BAR_H);
 
-    // ── Scene title — AI-generated or fallback ──────────────────────
+    // ── Scene title with AI-driven text style ────────────────────────
     const sceneLabel = aiScene?.sceneTitle ?? fallbackBeats[Math.min(sceneIdx, fallbackBeats.length - 1)];
-    if (t < 0.78) {
-      const fa = t < 0.15 ? t / 0.15 : t > 0.58 ? (0.78 - t) / 0.2 : 1;
-      const sy = t < 0.15 ? (1 - t / 0.15) * 10 : 0;
-      drawAnimText(ctx, sceneLabel, CW / 2, BAR_H / 2, fa, sy, 13, '#fff', false);
+    const ts = aiScene?.textStyle ?? {};
+    if (t < 0.82 && sceneLabel) {
+      const sizeMul = ts.fontSize === 'sm' ? 0.040 : ts.fontSize === 'lg' ? 0.066 : ts.fontSize === 'xl' ? 0.082 : 0.052;
+      const fontSize = Math.round(CW * sizeMul);
+      const textColor = ts.color || '#fff';
+      // Position
+      let yPos: number;
+      if (ts.position === 'top')      yPos = BAR_H + fontSize * 1.2;
+      else if (ts.position === 'middle') yPos = CH * 0.5;
+      else if (ts.position === 'bottom') yPos = CH - BAR_H - fontSize * 1.5;
+      else                               yPos = BAR_H + fontSize * 0.9;     // default top-band
+      // Animation
+      const fa = t < 0.18 ? t / 0.18 : t > 0.62 ? (0.82 - t) / 0.2 : 1;
+      let sy = 0;
+      const anim = ts.animation || 'slide-up';
+      if (anim === 'slide-up')   sy = t < 0.18 ? (1 - t / 0.18) * 18 : 0;
+      else if (anim === 'pop')   sy = t < 0.12 ? (1 - t / 0.12) * -14 : 0;
+      else if (anim === 'bounce') sy = Math.sin(t * Math.PI * 4) * 3;
+      // Optional rotation
+      const rot = (ts.rotation || 0) * Math.PI / 180;
+
+      ctx.save();
+      ctx.globalAlpha = fa;
+      ctx.translate(CW / 2, yPos + sy);
+      ctx.rotate(rot);
+      ctx.font = `800 ${fontSize}px Inter, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Pill / highlight background
+      if (ts.background === 'pill') {
+        const m = ctx.measureText(sceneLabel);
+        const padX = fontSize * 0.55, padY = fontSize * 0.4;
+        const bw = m.width + padX * 2;
+        const bh = fontSize + padY * 2;
+        ctx.fillStyle = hexToRgba(palette.primary, 0.85);
+        drawRoundedRect(ctx, -bw / 2, -bh / 2, bw, bh, bh / 2);
+        ctx.fill();
+      } else if (ts.background === 'highlight') {
+        const m = ctx.measureText(sceneLabel);
+        ctx.fillStyle = hexToRgba(palette.secondary, 0.65);
+        ctx.fillRect(-m.width / 2 - 8, -fontSize * 0.55, m.width + 16, fontSize * 1.1);
+      }
+
+      ctx.shadowColor = 'rgba(0,0,0,0.85)';
+      ctx.shadowBlur = 14;
+      ctx.shadowOffsetY = 2;
+      ctx.fillStyle = textColor;
+      ctx.fillText(sceneLabel, 0, 0);
+      ctx.restore();
     }
 
     // ── Hook text (scene 0 only) ─────────────────────────────────────
@@ -467,16 +769,18 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
       drawAnimText(ctx, title || '', CW / 2, CH - BAR_H - 52, ta * 0.9, sy, 15, 'rgba(255,255,255,0.85)', true);
     }
 
-    // ── CTA pill on last scene (AI-generated or default) ─────────────
+    // ── CTA pill on last scene (uses AI palette for colour) ─────────
     if (sceneIdx === n - 1 && t > 0.35) {
       const ca = Math.min((t - 0.35) / 0.2, 1);
       const ctaLabel = ctaText || (aiScene ? '👇 Save this!' : '👇 Full recipe in bio!');
       const btnW = CW * 0.72, btnH = 40, btnX = (CW - btnW) / 2, btnY = CH - BAR_H - 58;
       ctx.save();
       ctx.globalAlpha = ca;
-      ctx.fillStyle = 'rgba(139,92,246,0.88)';
+      ctx.fillStyle = hexToRgba(palette.primary, 0.92);
       drawRoundedRect(ctx, btnX, btnY - btnH / 2, btnW, btnH, 20);
       ctx.fill();
+      ctx.shadowColor = hexToRgba(palette.primary, 0.6);
+      ctx.shadowBlur = 16;
       ctx.font = `700 14px Inter, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -485,13 +789,13 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
       ctx.restore();
     }
 
-    // ── Scene dots ──────────────────────────────────────────────────
+    // ── Scene dots (palette-coloured) ───────────────────────────────
     const dotR = 2.5, dotSp = 10;
     const dotsX = CW / 2 - ((n - 1) * dotSp) / 2;
     for (let i = 0; i < n; i++) {
       ctx.beginPath();
       ctx.arc(dotsX + i * dotSp, CH - BAR_H - 14, dotR, 0, Math.PI * 2);
-      ctx.fillStyle = i === sceneIdx ? '#8b5cf6' : 'rgba(255,255,255,0.25)';
+      ctx.fillStyle = i === sceneIdx ? palette.primary : 'rgba(255,255,255,0.25)';
       ctx.fill();
     }
 
@@ -505,11 +809,11 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
     ctx.fillText('StoryReel AI', CW - 12, CH - BAR_H - 18);
     ctx.restore();
 
-    // ── Progress bar ────────────────────────────────────────────────
+    // ── Progress bar (palette-coloured) ──────────────────────────────
     const prog = globalFrame / TOTAL_FRAMES;
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
     ctx.fillRect(0, CH - 3, CW, 3);
-    ctx.fillStyle = '#8b5cf6';
+    ctx.fillStyle = palette.primary;
     ctx.fillRect(0, CH - 3, CW * prog, 3);
   };
 
