@@ -15,13 +15,26 @@ export type Category =
   | 'REAL_ESTATE' | 'FESTIVAL' | 'BIRTHDAY' | 'COUPLE' | 'LUXURY'
   | 'VLOG' | 'OTHER';
 
+export interface AISceneData {
+  originalIndex: number;
+  sceneTitle: string;
+  narration: string;
+  transition: 'dissolve' | 'zoom-punch' | 'slide-left' | 'slide-up' | 'blur-out' | 'light-leak';
+  storyBeat: string;
+  emotion: string;
+  focusPoint: 'center' | 'top' | 'bottom' | 'left' | 'right';
+  kenBurnsStyle: 'zoom-in' | 'zoom-out' | 'pan-left' | 'pan-right' | 'pan-up' | 'pan-down';
+}
+
 interface RenderOptions {
   images: HTMLImageElement[];
   category: Category;
   mood: Mood;
-  duration: number;       // seconds
+  duration: number;
   hook: string;
   title: string;
+  ctaText?: string;
+  aiScenes?: AISceneData[];   // ← AI-generated scene data (optional — falls back to generic)
   onProgress: (pct: number) => void;
 }
 
@@ -286,8 +299,27 @@ function applyTransition(
 
 // ─── Main renderer ────────────────────────────────────────────────────────────
 
+// ─── AI-driven KB preset ─────────────────────────────────────────────────────
+
+function getAIKenBurns(style: AISceneData['kenBurnsStyle'], focusPoint: AISceneData['focusPoint']) {
+  const focusMap: Record<string, { x: number; y: number }> = {
+    center: { x: 0.5, y: 0.5 }, top: { x: 0.5, y: 0.3 },
+    bottom: { x: 0.5, y: 0.7 }, left: { x: 0.3, y: 0.5 }, right: { x: 0.7, y: 0.5 },
+  };
+  const { x: fx, y: fy } = focusMap[focusPoint] || focusMap.center;
+  switch (style) {
+    case 'zoom-in':  return { s0: 1.00, s1: 1.10, x0: fx, y0: fy, x1: fx + 0.02, y1: fy + 0.01 };
+    case 'zoom-out': return { s0: 1.10, s1: 1.00, x0: fx + 0.05, y0: fy + 0.03, x1: fx, y1: fy };
+    case 'pan-left': return { s0: 1.05, s1: 1.05, x0: 0.6, y0: fy, x1: 0.4, y1: fy };
+    case 'pan-right':return { s0: 1.05, s1: 1.05, x0: 0.4, y0: fy, x1: 0.6, y1: fy };
+    case 'pan-up':   return { s0: 1.05, s1: 1.05, x0: fx, y0: 0.65, x1: fx, y1: 0.42 };
+    case 'pan-down': return { s0: 1.05, s1: 1.05, x0: fx, y0: 0.38, x1: fx, y1: 0.62 };
+    default:         return KB_PRESETS[0];
+  }
+}
+
 export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
-  const { images, category, mood, duration, hook, title, onProgress } = opts;
+  const { images, category, mood, duration, hook, title, ctaText, aiScenes, onProgress } = opts;
 
   const CW = 540, CH = 960;
   const FPS = 30;
@@ -300,10 +332,21 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
   const ctx = canvas.getContext('2d', { willReadFrequently: false })!;
 
   const grade = GRADE[category] || GRADE.DEFAULT;
-  const transitions = getTransitions(mood);
-  const beats = STORY_BEATS[category] || STORY_BEATS.DEFAULT;
-  const n = images.length;
-  const framesPerScene = Math.floor((TOTAL_FRAMES - transitions.length * TRANS_FRAMES) / n);
+  const fallbackTransitions = getTransitions(mood);
+  const fallbackBeats = STORY_BEATS[category] || STORY_BEATS.DEFAULT;
+
+  // ── Re-order images using AI scene sequence ──────────────────────────────
+  let orderedImages = images;
+  let orderedScenes = aiScenes;
+  if (aiScenes && aiScenes.length > 0) {
+    orderedImages = aiScenes
+      .filter(s => s.originalIndex < images.length)
+      .map(s => images[s.originalIndex]);
+    orderedScenes = aiScenes.filter(s => s.originalIndex < images.length);
+  }
+
+  const n = orderedImages.length;
+  const framesPerScene = Math.floor((TOTAL_FRAMES - (n - 1) * TRANS_FRAMES) / n);
 
   // Particles for this category
   const useParticles = ['COOKING', 'CAFE', 'FOOD_BUSINESS'].includes(category);
@@ -311,8 +354,13 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
   const particles = useParticles ? makeSteamParticles(CW, CH) :
                     useSparkles  ? makeSparkles(CW, CH) : [];
 
-  // KB preset per scene
-  const kbs = images.map((_, i) => KB_PRESETS[i % KB_PRESETS.length]);
+  // Per-scene KB: use AI data or fallback to presets
+  const kbs = orderedImages.map((_, i) => {
+    const sceneAI = orderedScenes?.[i];
+    return sceneAI
+      ? getAIKenBurns(sceneAI.kenBurnsStyle, sceneAI.focusPoint)
+      : KB_PRESETS[i % KB_PRESETS.length];
+  });
 
   const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
     ? 'video/webm;codecs=vp9' : 'video/webm';
@@ -325,17 +373,16 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
   let globalFrame = 0;
 
   const drawScene = (img: HTMLImageElement, sceneIdx: number, localFrame: number, totalSceneFrames: number) => {
-    const t = localFrame / totalSceneFrames; // 0→1
+    const t = localFrame / totalSceneFrames;
     const kb = kbs[sceneIdx];
+    const aiScene = orderedScenes?.[sceneIdx];
 
-    // ── Background + image ──────────────────────────────────────────
     ctx.clearRect(0, 0, CW, CH);
 
-    // Ken Burns transform
+    // ── Ken Burns (AI-driven direction per scene) ────────────────────
     const scale = kb.s0 + (kb.s1 - kb.s0) * t;
     const cx = (kb.x0 + (kb.x1 - kb.x0) * t) * CW;
     const cy = (kb.y0 + (kb.y1 - kb.y0) * t) * CH;
-
     ctx.save();
     ctx.translate(cx, cy);
     ctx.scale(scale, scale);
@@ -347,32 +394,25 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
     applyGrade(ctx, CW, CH, grade);
 
     // ── Particles ───────────────────────────────────────────────────
-    if (particles.length > 0) {
-      tickParticles(particles);
-      drawParticles(ctx, particles);
-    }
+    if (particles.length > 0) { tickParticles(particles); drawParticles(ctx, particles); }
 
     // ── Film grain ──────────────────────────────────────────────────
     if (localFrame % 3 === 0) {
       for (let i = 0; i < 600; i++) {
-        const gx = Math.random() * CW;
-        const gy = Math.random() * CH;
         ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.03})`;
-        ctx.fillRect(gx, gy, 1, 1);
+        ctx.fillRect(Math.random() * CW, Math.random() * CH, 1, 1);
       }
     }
 
     // ── Letterbox ───────────────────────────────────────────────────
     drawBars(ctx, CW, CH, BAR_H);
 
-    // ── Story beat text ─────────────────────────────────────────────
-    const beat = beats[Math.min(sceneIdx, beats.length - 1)];
-
-    // Beat label (slides up from bottom of top bar)
-    if (t < 0.75) {
-      const fadeAlpha = t < 0.15 ? t / 0.15 : t > 0.55 ? (0.75 - t) / 0.2 : 1;
-      const slideY = t < 0.15 ? (1 - t / 0.15) * 10 : 0;
-      drawAnimText(ctx, beat, CW / 2, BAR_H / 2, fadeAlpha, slideY, 13, '#fff', false);
+    // ── Scene title — AI-generated or fallback ──────────────────────
+    const sceneLabel = aiScene?.sceneTitle ?? fallbackBeats[Math.min(sceneIdx, fallbackBeats.length - 1)];
+    if (t < 0.78) {
+      const fa = t < 0.15 ? t / 0.15 : t > 0.58 ? (0.78 - t) / 0.2 : 1;
+      const sy = t < 0.15 ? (1 - t / 0.15) * 10 : 0;
+      drawAnimText(ctx, sceneLabel, CW / 2, BAR_H / 2, fa, sy, 13, '#fff', false);
     }
 
     // ── Hook text (scene 0 only) ─────────────────────────────────────
@@ -390,36 +430,58 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
       }
       if (line) lines.push(line);
       const lh = Math.round(CW * 0.082);
-      const totalH = lines.length * lh;
-      const baseY = CH / 2 - totalH / 2;
+      const baseY = CH / 2 - (lines.length * lh) / 2;
       const slideY = (1 - ha) * 20;
       for (let i = 0; i < lines.length; i++) {
         drawAnimText(ctx, lines[i], CW / 2, baseY + i * lh, ha, slideY, Math.round(CW * 0.072), '#fff', true);
       }
     }
 
-    // ── Title (scene 1+) ─────────────────────────────────────────────
-    if (sceneIdx > 0 && sceneIdx < n - 1 && t > 0.1 && t < 0.7) {
-      const ta = t < 0.2 ? (t - 0.1) / 0.1 : t > 0.55 ? (0.7 - t) / 0.15 : 1;
-      const slideY = t < 0.2 ? (1 - (t - 0.1) / 0.1) * 14 : 0;
-      drawAnimText(ctx, title || '', CW / 2, CH - BAR_H - 52, ta * 0.9, slideY, 15, 'rgba(255,255,255,0.85)', true);
+    // ── Narration subtitle (scenes 1+) — AI-specific text ────────────
+    if (sceneIdx > 0 && aiScene?.narration && t > 0.12 && t < 0.72) {
+      const ta = t < 0.22 ? (t - 0.12) / 0.1 : t > 0.57 ? (0.72 - t) / 0.15 : 1;
+      const sy = t < 0.22 ? (1 - (t - 0.12) / 0.1) * 14 : 0;
+      // Word-wrap narration at bottom
+      const maxW = CW - 48;
+      const words = aiScene.narration.split(' ');
+      const lines: string[] = [];
+      let line = '';
+      ctx.font = `500 ${Math.round(CW * 0.042)}px Inter, system-ui, sans-serif`;
+      for (const w of words) {
+        const test = line ? `${line} ${w}` : w;
+        if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; }
+        else line = test;
+      }
+      if (line) lines.push(line);
+      const lh = Math.round(CW * 0.052);
+      const baseY = CH - BAR_H - 26 - lines.length * lh;
+      for (let i = 0; i < lines.length; i++) {
+        drawAnimText(ctx, lines[i], CW / 2, baseY + i * lh, ta * 0.9, sy, Math.round(CW * 0.042), 'rgba(255,255,255,0.88)', true);
+      }
     }
 
-    // ── CTA on last scene ────────────────────────────────────────────
+    // ── Fallback title for middle scenes (no AI) ─────────────────────
+    if (!aiScene && sceneIdx > 0 && sceneIdx < n - 1 && t > 0.1 && t < 0.7) {
+      const ta = t < 0.2 ? (t - 0.1) / 0.1 : t > 0.55 ? (0.7 - t) / 0.15 : 1;
+      const sy = t < 0.2 ? (1 - (t - 0.1) / 0.1) * 14 : 0;
+      drawAnimText(ctx, title || '', CW / 2, CH - BAR_H - 52, ta * 0.9, sy, 15, 'rgba(255,255,255,0.85)', true);
+    }
+
+    // ── CTA pill on last scene (AI-generated or default) ─────────────
     if (sceneIdx === n - 1 && t > 0.35) {
-      const ca = t > 0.35 ? Math.min((t - 0.35) / 0.2, 1) : 0;
-      const cta = '👇 Full recipe in bio!';
-      const btnW = CW * 0.7, btnH = 40, btnX = (CW - btnW) / 2, btnY = CH - BAR_H - 56;
+      const ca = Math.min((t - 0.35) / 0.2, 1);
+      const ctaLabel = ctaText || (aiScene ? '👇 Save this!' : '👇 Full recipe in bio!');
+      const btnW = CW * 0.72, btnH = 40, btnX = (CW - btnW) / 2, btnY = CH - BAR_H - 58;
       ctx.save();
       ctx.globalAlpha = ca;
-      ctx.fillStyle = 'rgba(139,92,246,0.85)';
+      ctx.fillStyle = 'rgba(139,92,246,0.88)';
       drawRoundedRect(ctx, btnX, btnY - btnH / 2, btnW, btnH, 20);
       ctx.fill();
       ctx.font = `700 14px Inter, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#fff';
-      ctx.fillText(cta, CW / 2, btnY);
+      ctx.fillText(ctaLabel, CW / 2, btnY);
       ctx.restore();
     }
 
@@ -457,7 +519,7 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
 
   // ─── Render loop ───────────────────────────────────────────────────────────
   for (let si = 0; si < n; si++) {
-    const img = images[si];
+    const img = orderedImages[si];
     const isLast = si === n - 1;
 
     // Scene frames
@@ -469,10 +531,10 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
       });
     }
 
-    // Transition frames (except after last scene)
+    // Transition: use AI-specified type, or fallback
     if (!isLast) {
-      const nextImg = images[si + 1];
-      const tType = transitions[si % transitions.length];
+      const nextImg = orderedImages[si + 1];
+      const tType = (orderedScenes?.[si]?.transition as Transition) ?? fallbackTransitions[si % fallbackTransitions.length];
       for (let f = 0; f < TRANS_FRAMES; f++) {
         await renderFrame(() => {
           const tp = f / TRANS_FRAMES;

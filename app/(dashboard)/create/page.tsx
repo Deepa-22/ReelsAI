@@ -96,6 +96,10 @@ export default function CreateReelPage() {
   const [hook, setHook]           = useState('');
   const [viralScore, setViralScore] = useState(0);
   const [showPreview, setShowPreview]  = useState(false);
+  const [renderPhase, setRenderPhase]  = useState<'analyzing'|'rendering'>('analyzing');
+  const [aiScenes, setAiScenes]        = useState<import('@/lib/cinematic-renderer').AISceneData[] | undefined>(undefined);
+  const [ctaText, setCtaText]          = useState('');
+  const [hashtags, setHashtags]        = useState<string[]>([]);
 
   const onDrop = useCallback((accepted: File[]) => {
     const newFiles = accepted.slice(0, 20 - files.length).map((file, i) => ({
@@ -115,6 +119,15 @@ export default function CreateReelPage() {
     disabled: files.length >= 20,
   });
 
+  // Convert a blob URL to base64 data URL for sending to the AI API
+  const toBase64 = (blobUrl: string): Promise<string> =>
+    fetch(blobUrl).then(r => r.blob()).then(b => new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = () => res(reader.result as string);
+      reader.onerror = rej;
+      reader.readAsDataURL(b);
+    }));
+
   const handleGenerate = async () => {
     if (!config.category || !config.mood) { toast.error('Pick a category and mood first'); return; }
     const imageFiles = files.filter(f => f.type === 'image');
@@ -123,26 +136,51 @@ export default function CreateReelPage() {
     setStep(5);
     setRenderStatus('rendering');
     setRenderProgress(0);
+    setRenderPhase('analyzing');
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(null);
     setVideoBlob(null);
-
-    // Build a punchy hook based on category
-    const hookMap: Record<string, string> = {
-      COOKING:'Wait until you see how this turned out 🍝✨',
-      TRAVEL: 'This place changed everything ✈️🌍',
-      WEDDING:'The most beautiful day of our lives 💒💍',
-      PETS:   'This little one owns my heart 🐾❤️',
-      FITNESS:'This transformation will shock you 💪🔥',
-      BABY:   'Tiny hands, forever in my heart 👶💕',
-      CAFE:   'The vibe here hits different ☕✨',
-      LUXURY: 'This is what living feels like 👑✨',
-    };
-    const generatedHook = hookMap[config.category] || `This ${config.category?.toLowerCase()} story will blow your mind ✨`;
-    setHook(generatedHook);
-    setViralScore(Math.floor(Math.random() * 18) + 78);
+    setAiScenes(undefined);
 
     try {
+      // ── Phase 1: AI Vision Analysis ──────────────────────────────────
+      let analysisResult: import('@/app/api/ai/analyze-photos/route').AIStoryAnalysis | null = null;
+      try {
+        // Convert first 6 images to base64 (cost/speed balance)
+        const base64Images = await Promise.all(
+          imageFiles.slice(0, 6).map(f => toBase64(f.preview))
+        );
+        const res = await fetch('/api/ai/analyze-photos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            images: base64Images,
+            category: config.category,
+            mood: config.mood,
+            title: config.title,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          analysisResult = data.analysis;
+        }
+      } catch (aiErr) {
+        console.warn('AI analysis failed, using fallback:', aiErr);
+      }
+
+      // Apply AI results
+      const finalHook = analysisResult?.hook || `You have to see how this turned out ✨`;
+      const finalCta  = analysisResult?.ctaText || '👇 Save this!';
+      const finalScore = analysisResult?.viralScore || Math.floor(Math.random() * 18) + 78;
+      setHook(finalHook);
+      setCtaText(finalCta);
+      setViralScore(finalScore);
+      setHashtags(analysisResult?.suggestedHashtags || []);
+      setAiScenes(analysisResult?.scenes);
+
+      // ── Phase 2: Cinematic Render ────────────────────────────────────
+      setRenderPhase('rendering');
+
       const loadedImages = await Promise.all(
         imageFiles.map(f => new Promise<HTMLImageElement>((res, rej) => {
           const img = new Image();
@@ -157,8 +195,10 @@ export default function CreateReelPage() {
         category: config.category as Category,
         mood: config.mood as Mood,
         duration: config.duration,
-        hook: generatedHook,
-        title: config.title || 'My Story',
+        hook: finalHook,
+        title: analysisResult?.title || config.title || 'My Story',
+        ctaText: finalCta,
+        aiScenes: analysisResult?.scenes,
         onProgress: setRenderProgress,
       });
 
@@ -440,31 +480,53 @@ export default function CreateReelPage() {
               <div className="text-center space-y-8 py-4">
                 <div className="relative mx-auto w-fit">
                   <div className="h-24 w-24 rounded-3xl bg-violet-500/20 flex items-center justify-center mx-auto">
-                    <Film className="h-12 w-12 text-violet-400 animate-pulse" />
+                    {renderPhase === 'analyzing'
+                      ? <Sparkles className="h-12 w-12 text-violet-400 animate-pulse" />
+                      : <Film className="h-12 w-12 text-violet-400 animate-pulse" />}
                   </div>
                   <div className="absolute inset-0 rounded-3xl border-2 border-violet-500/30 animate-ping" />
                 </div>
-                <div>
-                  <h2 className="text-2xl font-bold text-white">Creating your cinematic reel…</h2>
-                  <p className="text-violet-300 text-sm font-medium mt-1">
-                    {[...Object.entries(RENDER_LABELS)].reverse().find(([p]) => renderProgress >= Number(p))?.[1] ?? '🎬 Starting…'}
-                  </p>
-                </div>
-                <div className="max-w-md mx-auto space-y-3">
-                  <Progress value={renderProgress} className="h-3" />
-                  <p className="text-sm text-white/40">{renderProgress}% complete</p>
-                </div>
-                {/* checklist */}
-                <div className="space-y-1.5 text-left max-w-xs mx-auto">
-                  {Object.entries(RENDER_LABELS).filter(([p]) => Number(p) > 0).map(([p, label]) => (
-                    <div key={p} className={cn('flex items-center gap-2 text-xs transition-colors', renderProgress >= Number(p) ? 'text-white/70' : 'text-white/20')}>
-                      {renderProgress >= Number(p)
-                        ? <Check className="h-3 w-3 text-green-400 shrink-0" />
-                        : <div className="h-3 w-3 rounded-full border border-white/20 shrink-0" />}
-                      {label}
+
+                {/* Two-phase header */}
+                {renderPhase === 'analyzing' ? (
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">AI is analysing your photos…</h2>
+                    <p className="text-violet-300 text-sm font-medium mt-1">
+                      GPT-4 Vision is reading every photo to build your story
+                    </p>
+                    <div className="mt-6 grid grid-cols-3 gap-3 max-w-xs mx-auto text-xs text-white/50">
+                      {['🔍 What is in each photo', '📖 Story sequence', '✍️ Scene-specific text'].map(s => (
+                        <div key={s} className="glass-card rounded-xl p-2">{s}</div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ) : (
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Rendering your cinematic reel…</h2>
+                    <p className="text-violet-300 text-sm font-medium mt-1">
+                      {[...Object.entries(RENDER_LABELS)].reverse().find(([p]) => renderProgress >= Number(p))?.[1] ?? '🎬 Starting…'}
+                    </p>
+                  </div>
+                )}
+
+                {renderPhase === 'rendering' && (
+                  <>
+                    <div className="max-w-md mx-auto space-y-3">
+                      <Progress value={renderProgress} className="h-3" />
+                      <p className="text-sm text-white/40">{renderProgress}%</p>
+                    </div>
+                    <div className="space-y-1.5 text-left max-w-xs mx-auto">
+                      {Object.entries(RENDER_LABELS).filter(([p]) => Number(p) > 0).map(([p, label]) => (
+                        <div key={p} className={cn('flex items-center gap-2 text-xs transition-colors', renderProgress >= Number(p) ? 'text-white/70' : 'text-white/20')}>
+                          {renderProgress >= Number(p)
+                            ? <Check className="h-3 w-3 text-green-400 shrink-0" />
+                            : <div className="h-3 w-3 rounded-full border border-white/20 shrink-0" />}
+                          {label}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -516,19 +578,31 @@ export default function CreateReelPage() {
                       <p className="text-white text-sm font-medium leading-relaxed">"{hook}"</p>
                     </div>
 
-                    {/* What's inside */}
+                    {/* What the AI did */}
                     <div className="glass-card rounded-xl p-4 space-y-2">
-                      <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">Rendered with</div>
+                      <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">AI analysed & applied</div>
                       {[
-                        '✅ Ken Burns camera motion',
-                        `✅ ${config.category} colour grade`,
-                        '✅ Cinematic transitions',
-                        '✅ Story beat text overlays',
-                        '✅ Particle effects + vignette',
+                        aiScenes ? `✅ Story re-ordered (${aiScenes.length} scenes)` : '✅ Ken Burns per scene',
+                        aiScenes ? '✅ Scene-specific text from vision AI' : `✅ ${config.category} colour grade`,
+                        aiScenes ? '✅ AI-chosen transitions per cut' : '✅ Cinematic transitions',
+                        '✅ Cinematic colour grade + particles',
+                        aiScenes ? '✅ AI narration subtitles' : '✅ Story beat overlays',
                       ].map(f => (
                         <div key={f} className="text-xs text-white/60">{f}</div>
                       ))}
                     </div>
+
+                    {/* Hashtags */}
+                    {hashtags.length > 0 && (
+                      <div className="glass-card rounded-xl p-3 space-y-2">
+                        <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">AI Hashtags</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {hashtags.map(h => (
+                            <span key={h} className="text-[11px] text-violet-300 bg-violet-500/15 px-2 py-0.5 rounded-full border border-violet-500/20">{h}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 

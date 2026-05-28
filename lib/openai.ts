@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 
 let _openai: OpenAI | null = null;
-function getOpenAI() {
+export function getOpenAI() {
   if (!_openai) {
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new Error('The OPENAI_API_KEY environment variable is missing or empty; provide it to use OpenAI features.');
