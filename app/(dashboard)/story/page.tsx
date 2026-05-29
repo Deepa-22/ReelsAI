@@ -6,7 +6,9 @@ import {
   Wand2, Sparkles, ArrowRight, Loader2, Check, Download, RotateCcw,
   Mic, MicOff, Eye, ExternalLink, Star, TrendingUp, Palette,
   BookOpen, Heart, Plane, Briefcase, GraduationCap, Baby, Image as ImageIcon,
+  Shuffle, Calendar,
 } from 'lucide-react';
+import { STORY_BANK, THEME_META, getRandomPrompt, getDailyPrompt, type StoryTheme } from '@/lib/story-bank';
 import toast from 'react-hot-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +16,7 @@ import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import {
-  renderCinematicReel,
+  renderCinematicReelV2,
   type AISceneData,
   type AICreativeBrief,
   type Category, type Mood,
@@ -53,6 +55,8 @@ interface GeneratedImage { sceneIndex: number; imageUrl: string; status: 'pendin
 
 export default function StoryPage() {
   const [storyline, setStoryline] = useState('');
+  const [activeTheme, setActiveTheme] = useState<StoryTheme | 'all'>('diagnosis');
+  const [showBank, setShowBank] = useState(true);
   const [sceneCount, setSceneCount] = useState<4 | 6 | 8>(6);
   const [style, setStyle]   = useState('illustrated');
   const [mood, setMood]     = useState('EMOTIONAL');
@@ -63,6 +67,8 @@ export default function StoryPage() {
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [renderProgress, setRenderProgress] = useState(0);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [quality, setQuality] = useState<'sd' | 'hd'>('sd');
   const [errorMsg, setErrorMsg] = useState('');
 
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -190,21 +196,28 @@ export default function StoryPage() {
         },
       }));
 
-      const blob = await renderCinematicReel({
+      const fullNarration = `${storyPlan.hook}. ${validScenes.map(s => s.narration).join(' ')}. ${storyPlan.ctaText}`;
+
+      const result = await renderCinematicReelV2({
         images: loadedImages,
         category: 'OTHER' as Category,
         mood: mood as Mood,
-        duration: validScenes.length * 4,        // 4s per scene
+        duration: validScenes.length * 4,
         hook: storyPlan.hook,
         title: storyPlan.title,
         ctaText: storyPlan.ctaText,
         aiScenes,
         brief: storyPlan.brief,
+        quality,
+        narrationText: voiceOn ? fullNarration : undefined,
+        enableAudio: true,    // always mix BG music; narration only if voiceOn
         onProgress: setRenderProgress,
       });
 
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(result.videoBlob);
+      const thumb = URL.createObjectURL(result.thumbnailBlob);
       setVideoUrl(url);
+      setThumbnailUrl(thumb);
       setPhase('done');
 
       // Speak the hook when the video appears
@@ -217,20 +230,38 @@ export default function StoryPage() {
     }
   };
 
+  const safeFileName = () => (plan?.title || 'story').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+
   const handleDownload = () => {
     if (!videoUrl) return;
     const a = document.createElement('a');
     a.href = videoUrl;
-    const safe = (plan?.title || 'story').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    a.download = `storyreel-${safe}.webm`;
+    a.download = `honesthormones-${safeFileName()}.webm`;
     a.click();
-    toast.success('Downloading…');
+    toast.success('Downloading video…');
+  };
+
+  const handleDownloadThumbnail = () => {
+    if (!thumbnailUrl) return;
+    const a = document.createElement('a');
+    a.href = thumbnailUrl;
+    a.download = `honesthormones-${safeFileName()}-thumbnail.png`;
+    a.click();
+    toast.success('Downloading thumbnail…');
+  };
+
+  const copyCaption = () => {
+    if (!plan) return;
+    const caption = `${plan.title}\n\n${plan.hook}\n\n${plan.scenes.map(s => s.narration).join(' ')}\n\nIf you felt this — drop a 🌸 below.\n\n${plan.hashtags?.join(' ')}`;
+    navigator.clipboard.writeText(caption);
+    toast.success('Caption copied to clipboard ✨');
   };
 
   const reset = () => {
     stopSpeak();
     if (videoUrl) URL.revokeObjectURL(videoUrl);
-    setPhase('idle'); setPlan(null); setImages([]); setVideoUrl(null);
+    if (thumbnailUrl) URL.revokeObjectURL(thumbnailUrl);
+    setPhase('idle'); setPlan(null); setImages([]); setVideoUrl(null); setThumbnailUrl(null);
     setRenderProgress(0); setErrorMsg('');
   };
 
@@ -264,10 +295,68 @@ export default function StoryPage() {
         {/* ════ IDLE — story editor ════════════════════════════════════════ */}
         {phase === 'idle' && (
           <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
-            {/* Starter chips */}
-            <div className="space-y-2">
-              <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">Start from an example</div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {/* ═══ PMOS STORY BANK — for Honest Hormones content production ═══ */}
+            <div className="glass-card rounded-2xl p-4 space-y-3"
+              style={{ background: 'linear-gradient(135deg, rgba(236,72,153,0.10), rgba(139,92,246,0.06))', border: '1px solid rgba(236,72,153,0.25)' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">🌸</span>
+                  <div>
+                    <div className="text-sm font-semibold text-white">Honest Hormones Story Bank</div>
+                    <div className="text-[10px] text-white/50">30 ready prompts for daily content production</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => {
+                    const p = getDailyPrompt();
+                    setStoryline(p.prompt); setMood(p.mood);
+                    toast.success(`📅 Today's pick: ${p.title}`);
+                  }} className="px-2.5 py-1 rounded-lg bg-violet-500/20 text-violet-200 text-[10px] font-medium hover:bg-violet-500/30 transition-colors flex items-center gap-1">
+                    <Calendar className="h-3 w-3" />Today
+                  </button>
+                  <button onClick={() => {
+                    const p = getRandomPrompt();
+                    setStoryline(p.prompt); setMood(p.mood);
+                    toast.success(`🎲 ${p.title}`);
+                  }} className="px-2.5 py-1 rounded-lg bg-pink-500/20 text-pink-200 text-[10px] font-medium hover:bg-pink-500/30 transition-colors flex items-center gap-1">
+                    <Shuffle className="h-3 w-3" />Surprise
+                  </button>
+                </div>
+              </div>
+
+              {/* Theme tabs */}
+              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                {(Object.keys(THEME_META) as StoryTheme[]).map(t => (
+                  <button key={t} onClick={() => setActiveTheme(t)}
+                    className={cn('shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all flex items-center gap-1',
+                      activeTheme === t ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/55 hover:text-white/80')}>
+                    <span>{THEME_META[t].emoji}</span>{THEME_META[t].label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Prompt list for active theme */}
+              <div className="grid grid-cols-1 gap-1.5 max-h-56 overflow-y-auto pr-1">
+                {STORY_BANK.filter(p => p.theme === activeTheme).map(p => (
+                  <button key={p.id}
+                    onClick={() => {
+                      setStoryline(p.prompt); setMood(p.mood);
+                      toast.success(`✓ ${p.title}`);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg bg-white/5 hover:bg-violet-500/15 border border-transparent hover:border-violet-500/30 transition-all">
+                    <div className="text-xs font-medium text-white/85 leading-snug">{p.title}</div>
+                    <div className="text-[10px] text-violet-200/70 mt-0.5 italic line-clamp-1">"{p.hookExample}"</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Original starter chips — kept as fallback for non-PMOS content */}
+            <details className="space-y-2">
+              <summary className="cursor-pointer text-xs font-semibold text-white/40 uppercase tracking-wider hover:text-white/60 list-none flex items-center gap-1">
+                <ArrowRight className="h-3 w-3" />Other story examples
+              </summary>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
                 {STARTER_STORIES.map(s => (
                   <button key={s.label} onClick={() => { setStoryline(s.text); setMood(s.mood); }}
                     className="glass-card rounded-xl p-3 text-left hover:border-violet-500/40 transition-all flex items-start gap-2.5 group">
@@ -279,7 +368,7 @@ export default function StoryPage() {
                   </button>
                 ))}
               </div>
-            </div>
+            </details>
 
             {/* Story input */}
             <div className="glass-card rounded-2xl p-5 space-y-3">
@@ -290,14 +379,14 @@ export default function StoryPage() {
               <textarea
                 value={storyline}
                 onChange={e => setStoryline(e.target.value)}
-                rows={5}
-                maxLength={500}
+                rows={8}
+                maxLength={1800}
                 placeholder="My PCOS journey — from diagnosis day to feeling strong again. The shock, the medication, the new routine, the wins…"
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-violet-500/50 resize-none leading-relaxed"
               />
               <div className="flex items-center justify-between text-xs">
-                <span className="text-white/30">{storyline.length}/500</span>
-                <span className="text-white/30">~₹30 per story · {Math.floor(sceneCount * 0.04 * 85)} ₹ cost</span>
+                <span className="text-white/30">{storyline.length}/1800</span>
+                <span className="text-white/30">~₹{Math.floor(sceneCount * 0.04 * 85)} cost · {sceneCount} AI images</span>
               </div>
             </div>
 
@@ -364,6 +453,33 @@ export default function StoryPage() {
                 </div>
               </div>
               <Switch checked={voiceOn} onCheckedChange={setVoiceOn} />
+            </div>
+
+            {/* Quality */}
+            <div className="glass-card rounded-2xl p-4 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-xl bg-violet-500/15 flex items-center justify-center">
+                  <ImageIcon className="h-4 w-4 text-violet-400" />
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-white">Export quality</div>
+                  <div className="text-xs text-white/40">HD recommended for YouTube Shorts. Auto-thumbnail included.</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => setQuality('sd')}
+                  className={cn('p-3 rounded-xl text-left transition-all border',
+                    quality === 'sd' ? 'bg-violet-500/15 border-violet-500/50' : 'glass border-transparent hover:border-white/15')}>
+                  <div className="text-sm font-medium text-white">SD · 540×960</div>
+                  <div className="text-[10px] text-white/40">Fast preview (~90s render)</div>
+                </button>
+                <button onClick={() => setQuality('hd')}
+                  className={cn('p-3 rounded-xl text-left transition-all border',
+                    quality === 'hd' ? 'bg-violet-500/15 border-violet-500/50' : 'glass border-transparent hover:border-white/15')}>
+                  <div className="text-sm font-medium text-white">HD · 1080×1920 <span className="text-[10px] text-pink-300 ml-1">YouTube Shorts</span></div>
+                  <div className="text-[10px] text-white/40">Full quality (~3 min render)</div>
+                </button>
+              </div>
             </div>
 
             {/* Generate */}
@@ -567,15 +683,38 @@ export default function StoryPage() {
               </div>
             </div>
 
-            {/* Actions */}
+            {/* Thumbnail preview if available */}
+            {thumbnailUrl && (
+              <div className="max-w-md mx-auto glass-card rounded-xl p-3 space-y-2">
+                <div className="text-[10px] font-semibold text-white/40 uppercase tracking-wider flex items-center gap-1">
+                  <ImageIcon className="h-3 w-3" />Auto-generated thumbnail (for YouTube custom thumbnail)
+                </div>
+                <img src={thumbnailUrl} alt="thumbnail" className="w-full rounded-lg" style={{ maxHeight: 140, objectFit: 'cover' }} />
+              </div>
+            )}
+
+            {/* Actions — primary row */}
             <div className="flex gap-3 max-w-md mx-auto">
               <Button variant="glow" size="lg" className="flex-1" onClick={handleDownload}>
-                <Download className="h-5 w-5" /> Download
+                <Download className="h-5 w-5" /> Video
               </Button>
+              {thumbnailUrl && (
+                <Button variant="outline" size="lg" onClick={handleDownloadThumbnail}>
+                  <ImageIcon className="h-4 w-4" /> Thumb
+                </Button>
+              )}
               <Button variant="outline" size="lg" onClick={reset}>
                 <RotateCcw className="h-4 w-4" /> New
               </Button>
             </div>
+
+            {/* Secondary action — caption */}
+            <div className="flex justify-center">
+              <Button variant="ghost" size="sm" onClick={copyCaption} className="text-white/60 hover:text-white">
+                <Sparkles className="h-3.5 w-3.5 mr-1.5" />Copy ready-to-post caption + hashtags
+              </Button>
+            </div>
+
             <p className="text-center text-xs text-white/30">
               WebM format. Convert to MP4 free at{' '}
               <a href="https://cloudconvert.com/webm-to-mp4" target="_blank" rel="noreferrer" className="text-violet-400 hover:underline inline-flex items-center gap-0.5">

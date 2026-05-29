@@ -5,6 +5,8 @@
  * and story-beat text overlays — rendered entirely in the browser via Canvas.
  */
 
+import { createAudioMix } from './audio-mixer';
+
 export type Mood =
   | 'CINEMATIC' | 'EMOTIONAL' | 'LUXURY' | 'COZY' | 'VIRAL'
   | 'FAST_PACED' | 'DREAMY' | 'RETRO' | 'MINIMAL' | 'DOCUMENTARY' | 'AESTHETIC';
@@ -79,7 +81,21 @@ interface RenderOptions {
   ctaText?: string;
   aiScenes?: AISceneData[];
   brief?: AICreativeBrief;
+  /** 'sd' = 540×960 (fast), 'hd' = 1080×1920 (YouTube Shorts native) */
+  quality?: 'sd' | 'hd';
+  /** Full narration string for browser TTS + background music mix */
+  narrationText?: string;
+  /** Bake background music + narration into the audio track of the WebM */
+  enableAudio?: boolean;
   onProgress: (pct: number) => void;
+}
+
+export interface RenderResult {
+  videoBlob: Blob;
+  thumbnailBlob: Blob;    // PNG, full-resolution
+  thumbnailDataUrl: string;
+  width: number;
+  height: number;
 }
 
 // ─── Colour grades ───────────────────────────────────────────────────────────
@@ -547,10 +563,25 @@ function getAIKenBurns(style: AISceneData['kenBurnsStyle'], focusPoint: AISceneD
   }
 }
 
+/**
+ * Backwards-compatible wrapper — returns just the video Blob.
+ * Prefer renderCinematicReelV2() for new code (returns thumbnail too).
+ */
 export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
-  const { images, category, mood, duration, hook, title, ctaText, aiScenes, brief, onProgress } = opts;
+  const result = await renderCinematicReelV2(opts);
+  return result.videoBlob;
+}
 
-  const CW = 540, CH = 960;
+/**
+ * V2 renderer — returns video + auto-extracted thumbnail.
+ * Pass `quality: 'hd'` for YouTube Shorts-native 1080×1920 output.
+ */
+export async function renderCinematicReelV2(opts: RenderOptions): Promise<RenderResult> {
+  const { images, category, mood, duration, hook, title, ctaText, aiScenes, brief, quality = 'sd', onProgress } = opts;
+
+  // HD = 1080×1920 (YouTube Shorts native), SD = 540×960 (fast preview)
+  const CW = quality === 'hd' ? 1080 : 540;
+  const CH = quality === 'hd' ? 1920 : 960;
   const FPS = 30;
   const TOTAL_FRAMES = duration * FPS;
   const BAR_H = Math.round(CH * 0.06);
@@ -596,13 +627,42 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
       : KB_PRESETS[i % KB_PRESETS.length];
   });
 
-  const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-    ? 'video/webm;codecs=vp9' : 'video/webm';
-  const stream = canvas.captureStream(FPS);
-  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 5_000_000 });
+  const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+    ? 'video/webm;codecs=vp9,opus'
+    : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
+      : 'video/webm';
+  const videoStream = canvas.captureStream(FPS);
+
+  // ── Set up audio mix (background music + narration) ──────────────────────
+  let audioHandle: Awaited<ReturnType<typeof createAudioMix>> = null;
+  let combinedStream: MediaStream = videoStream;
+  if (opts.enableAudio && opts.narrationText) {
+    try {
+      audioHandle = await createAudioMix(opts.narrationText, mood, duration * 1000);
+      if (audioHandle) {
+        const videoTracks = videoStream.getVideoTracks();
+        const audioTracks = audioHandle.stream.getAudioTracks();
+        combinedStream = new MediaStream([...videoTracks, ...audioTracks]);
+      }
+    } catch (e) {
+      console.warn('[renderer] Audio mix failed, proceeding video-only:', e);
+    }
+  }
+
+  const recorder = new MediaRecorder(combinedStream, {
+    mimeType,
+    videoBitsPerSecond: quality === 'hd' ? 8_000_000 : 5_000_000,
+    audioBitsPerSecond: 128_000,
+  });
   const chunks: Blob[] = [];
   recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
   recorder.start(100);
+
+  // Start audio playback so it gets recorded
+  if (audioHandle) {
+    audioHandle.start().catch((e) => console.warn('[renderer] audio start failed:', e));
+  }
 
   let globalFrame = 0;
 
@@ -663,57 +723,133 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
     // ── Letterbox ───────────────────────────────────────────────────
     drawBars(ctx, CW, CH, BAR_H);
 
-    // ── Scene title with AI-driven text style ────────────────────────
+    // ── Scene title with AI-driven KINETIC TYPOGRAPHY ─────────────────
     const sceneLabel = aiScene?.sceneTitle ?? fallbackBeats[Math.min(sceneIdx, fallbackBeats.length - 1)];
     const ts = aiScene?.textStyle ?? {};
-    if (t < 0.82 && sceneLabel) {
+    if (t < 0.85 && sceneLabel) {
       const sizeMul = ts.fontSize === 'sm' ? 0.040 : ts.fontSize === 'lg' ? 0.066 : ts.fontSize === 'xl' ? 0.082 : 0.052;
       const fontSize = Math.round(CW * sizeMul);
       const textColor = ts.color || '#fff';
-      // Position
       let yPos: number;
-      if (ts.position === 'top')      yPos = BAR_H + fontSize * 1.2;
+      if (ts.position === 'top')         yPos = BAR_H + fontSize * 1.4;
       else if (ts.position === 'middle') yPos = CH * 0.5;
       else if (ts.position === 'bottom') yPos = CH - BAR_H - fontSize * 1.5;
-      else                               yPos = BAR_H + fontSize * 0.9;     // default top-band
-      // Animation
-      const fa = t < 0.18 ? t / 0.18 : t > 0.62 ? (0.82 - t) / 0.2 : 1;
-      let sy = 0;
-      const anim = ts.animation || 'slide-up';
-      if (anim === 'slide-up')   sy = t < 0.18 ? (1 - t / 0.18) * 18 : 0;
-      else if (anim === 'pop')   sy = t < 0.12 ? (1 - t / 0.12) * -14 : 0;
-      else if (anim === 'bounce') sy = Math.sin(t * Math.PI * 4) * 3;
-      // Optional rotation
+      else                               yPos = BAR_H + fontSize * 1.1;
       const rot = (ts.rotation || 0) * Math.PI / 180;
+      const anim = ts.animation || 'slide-up';
+
+      // Overall fade
+      const fa = t < 0.18 ? t / 0.18 : t > 0.65 ? (0.85 - t) / 0.2 : 1;
 
       ctx.save();
-      ctx.globalAlpha = fa;
-      ctx.translate(CW / 2, yPos + sy);
+      ctx.translate(CW / 2, yPos);
       ctx.rotate(rot);
       ctx.font = `800 ${fontSize}px Inter, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      // Pill / highlight background
+      // Background pill/highlight (drawn before letters)
       if (ts.background === 'pill') {
         const m = ctx.measureText(sceneLabel);
-        const padX = fontSize * 0.55, padY = fontSize * 0.4;
+        const padX = fontSize * 0.55, padY = fontSize * 0.42;
         const bw = m.width + padX * 2;
         const bh = fontSize + padY * 2;
-        ctx.fillStyle = hexToRgba(palette.primary, 0.85);
+        ctx.save();
+        ctx.globalAlpha = fa;
+        ctx.fillStyle = hexToRgba(palette.primary, 0.88);
         drawRoundedRect(ctx, -bw / 2, -bh / 2, bw, bh, bh / 2);
         ctx.fill();
+        // Subtle inner glow
+        ctx.shadowColor = hexToRgba(palette.primary, 0.5);
+        ctx.shadowBlur = 18;
+        ctx.fillStyle = hexToRgba(palette.primary, 0.0);
+        ctx.fill();
+        ctx.restore();
       } else if (ts.background === 'highlight') {
         const m = ctx.measureText(sceneLabel);
-        ctx.fillStyle = hexToRgba(palette.secondary, 0.65);
+        ctx.save();
+        ctx.globalAlpha = fa;
+        ctx.fillStyle = hexToRgba(palette.secondary, 0.7);
         ctx.fillRect(-m.width / 2 - 8, -fontSize * 0.55, m.width + 16, fontSize * 1.1);
+        ctx.restore();
       }
 
+      // ─── KINETIC ANIMATIONS ───────────────────────────────────────
+      // Each branch draws text differently for a dramatically more dynamic feel.
       ctx.shadowColor = 'rgba(0,0,0,0.85)';
       ctx.shadowBlur = 14;
       ctx.shadowOffsetY = 2;
       ctx.fillStyle = textColor;
-      ctx.fillText(sceneLabel, 0, 0);
+
+      if (anim === 'typewriter') {
+        // Letter-by-letter reveal — feels like real typing
+        const revealT = Math.min(1, Math.max(0, (t - 0.1) / 0.35));   // reveal during first 35% after entry
+        const charsToShow = Math.max(1, Math.floor(sceneLabel.length * revealT));
+        const revealed = sceneLabel.slice(0, charsToShow);
+        ctx.globalAlpha = fa;
+        ctx.fillText(revealed, 0, 0);
+        // Blinking cursor while typing
+        if (revealT < 1 && Math.floor(t * 60) % 12 < 6) {
+          const m = ctx.measureText(revealed);
+          ctx.fillRect(m.width / 2 + 2, -fontSize * 0.5, 3, fontSize);
+        }
+      } else if (anim === 'pop') {
+        // Per-word pop-in (staggered scale + fade)
+        const words = sceneLabel.split(' ');
+        const wordWidths = words.map(w => ctx.measureText(w + ' ').width);
+        const totalWidth = wordWidths.reduce((s, w) => s + w, 0) - ctx.measureText(' ').width;
+        let xOff = -totalWidth / 2;
+        for (let i = 0; i < words.length; i++) {
+          const startT = 0.12 + i * 0.08;
+          const popT = Math.min(1, Math.max(0, (t - startT) / 0.18));
+          if (popT <= 0) { xOff += wordWidths[i]; continue; }
+          const scale = popT < 1 ? 0.6 + popT * 0.5 : 1 + Math.sin((t - startT) * 8) * 0.02;   // overshoot then settle
+          const wordAlpha = Math.min(fa, popT);
+          ctx.save();
+          ctx.translate(xOff + wordWidths[i] / 2, 0);
+          ctx.scale(scale, scale);
+          ctx.globalAlpha = wordAlpha;
+          ctx.fillText(words[i], 0, 0);
+          ctx.restore();
+          xOff += wordWidths[i];
+        }
+      } else if (anim === 'bounce') {
+        // Per-letter sine wave bounce — playful, viral feel
+        const m = ctx.measureText(sceneLabel);
+        let xOff = -m.width / 2;
+        for (let i = 0; i < sceneLabel.length; i++) {
+          const ch = sceneLabel[i];
+          const w = ctx.measureText(ch).width;
+          const bounceOffset = Math.sin((t * Math.PI * 3) + i * 0.5) * 4;
+          const letterAlpha = fa * Math.min(1, Math.max(0, (t * 6) - i * 0.05));   // staggered fade-in
+          ctx.save();
+          ctx.globalAlpha = letterAlpha;
+          ctx.fillText(ch, xOff + w / 2, bounceOffset);
+          ctx.restore();
+          xOff += w;
+        }
+      } else if (anim === 'fade') {
+        // Simple fade — quiet, emotional moments
+        ctx.globalAlpha = fa;
+        ctx.fillText(sceneLabel, 0, 0);
+      } else {
+        // slide-up (default) — staggered word slide-in
+        const words = sceneLabel.split(' ');
+        const wordWidths = words.map(w => ctx.measureText(w + ' ').width);
+        const totalWidth = wordWidths.reduce((s, w) => s + w, 0) - ctx.measureText(' ').width;
+        let xOff = -totalWidth / 2;
+        for (let i = 0; i < words.length; i++) {
+          const startT = 0.10 + i * 0.06;
+          const slideT = Math.min(1, Math.max(0, (t - startT) / 0.20));
+          const sy = (1 - slideT) * 22;
+          const wordAlpha = Math.min(fa, slideT);
+          ctx.save();
+          ctx.globalAlpha = wordAlpha;
+          ctx.fillText(words[i], xOff + wordWidths[i] / 2, sy);
+          ctx.restore();
+          xOff += wordWidths[i];
+        }
+      }
       ctx.restore();
     }
 
@@ -821,6 +957,10 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
     requestAnimationFrame(() => { fn(); resolve(); });
   });
 
+  // Thumbnail capture state — capture at ~25% playthrough (the strongest moment of scene 0/1)
+  const thumbnailAtFrame = Math.floor(TOTAL_FRAMES * 0.25);
+  let thumbnailDataUrl = '';
+
   // ─── Render loop ───────────────────────────────────────────────────────────
   for (let si = 0; si < n; si++) {
     const img = orderedImages[si];
@@ -832,10 +972,13 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
         drawScene(img, si, f, framesPerScene);
         globalFrame++;
         onProgress(Math.round((globalFrame / TOTAL_FRAMES) * 88));
+        // Capture thumbnail at sweet spot
+        if (!thumbnailDataUrl && globalFrame >= thumbnailAtFrame) {
+          thumbnailDataUrl = canvas.toDataURL('image/png', 0.92);
+        }
       });
     }
 
-    // Transition: use AI-specified type, or fallback
     if (!isLast) {
       const nextImg = orderedImages[si + 1];
       const tType = (orderedScenes?.[si]?.transition as Transition) ?? fallbackTransitions[si % fallbackTransitions.length];
@@ -854,11 +997,31 @@ export async function renderCinematicReel(opts: RenderOptions): Promise<Blob> {
     }
   }
 
+  // Fallback — if we never hit the trigger (very short reel), grab any final frame
+  if (!thumbnailDataUrl) thumbnailDataUrl = canvas.toDataURL('image/png', 0.92);
+
   onProgress(95);
   recorder.stop();
   await new Promise<void>((r) => { recorder.onstop = () => r(); });
-  stream.getTracks().forEach((t) => t.stop());
+  videoStream.getTracks().forEach((t) => t.stop());
+  combinedStream.getTracks().forEach((t) => t.stop());
+  if (audioHandle) audioHandle.stop();
   onProgress(100);
 
-  return new Blob(chunks, { type: mimeType });
+  const videoBlob = new Blob(chunks, { type: mimeType });
+
+  // Convert thumbnail data URL → Blob
+  const b64 = thumbnailDataUrl.split(',')[1];
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const thumbnailBlob = new Blob([bytes], { type: 'image/png' });
+
+  return {
+    videoBlob,
+    thumbnailBlob,
+    thumbnailDataUrl,
+    width: CW,
+    height: CH,
+  };
 }

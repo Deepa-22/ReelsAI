@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FAF7F4"/>
+      <stop offset="100%" stop-color="#F5E6D8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1080" height="1080" fill="url(#bg)"/>
+
+  <g text-anchor="middle" font-family="Cormorant Garamond, Playfair Display, serif">
+    <!-- Small eyebrow -->
+    <text x="540" y="420" font-size="34" letter-spacing="14" fill="#A8B9A0" font-weight="500">
+      EST. 2026
+    </text>
+
+    <!-- Stacked wordmark -->
+    <text x="540" y="560" font-size="155" font-weight="500" fill="#3D1F2E" letter-spacing="-4">
+      honest
+    </text>
+    <text x="540" y="720" font-size="155" font-weight="500" fill="#3D1F2E" letter-spacing="-4">
+      hormones
+    </text>
+
+    <!-- Underline -->
+    <rect x="460" y="755" width="160" height="5" rx="2.5" fill="#E8A0B7"/>
+
+    <!-- Tag -->
+    <text x="540" y="850" font-size="32" font-style="italic" fill="#3D1F2E" opacity="0.65" font-family="Cormorant Garamond, serif">
+      real stories · real hormones
+    </text>
+  </g>
+</svg>
