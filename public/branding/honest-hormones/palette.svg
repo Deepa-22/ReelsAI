@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" font-family="Inter, sans-serif">
+  <rect width="1200" height="500" fill="#FAF7F4"/>
+
+  <text x="60" y="60" font-size="28" font-weight="700" fill="#1A1416">Honest Hormones — Palette</text>
+  <text x="60" y="92" font-size="14" fill="#3D1F2E" opacity="0.6">Quiet, healing, feminine without being girly.</text>
+
+  <!-- Soft Rose (Primary) -->
+  <g transform="translate(60, 140)">
+    <rect width="170" height="220" rx="14" fill="#E8A0B7"/>
+    <text x="14" y="240" font-size="13" font-weight="600" fill="#1A1416">Soft Rose</text>
+    <text x="14" y="258" font-size="12" fill="#1A1416" opacity="0.55">#E8A0B7 — Primary</text>
+  </g>
+
+  <!-- Warm Cream -->
+  <g transform="translate(248, 140)">
+    <rect width="170" height="220" rx="14" fill="#F5E6D8" stroke="#3D1F2E" stroke-opacity="0.08"/>
+    <text x="14" y="240" font-size="13" font-weight="600" fill="#1A1416">Warm Cream</text>
+    <text x="14" y="258" font-size="12" fill="#1A1416" opacity="0.55">#F5E6D8 — Secondary</text>
+  </g>
+
+  <!-- Aubergine -->
+  <g transform="translate(436, 140)">
+    <rect width="170" height="220" rx="14" fill="#3D1F2E"/>
+    <text x="14" y="240" font-size="13" font-weight="600" fill="#1A1416">Aubergine</text>
+    <text x="14" y="258" font-size="12" fill="#1A1416" opacity="0.55">#3D1F2E — Deep</text>
+  </g>
+
+  <!-- Sage -->
+  <g transform="translate(624, 140)">
+    <rect width="170" height="220" rx="14" fill="#A8B9A0"/>
+    <text x="14" y="240" font-size="13" font-weight="600" fill="#1A1416">Sage</text>
+    <text x="14" y="258" font-size="12" fill="#1A1416" opacity="0.55">#A8B9A0 — Wellness</text>
+  </g>
+
+  <!-- Soft White -->
+  <g transform="translate(812, 140)">
+    <rect width="170" height="220" rx="14" fill="#FAF7F4" stroke="#3D1F2E" stroke-opacity="0.10"/>
+    <text x="14" y="240" font-size="13" font-weight="600" fill="#1A1416">Soft White</text>
+    <text x="14" y="258" font-size="12" fill="#1A1416" opacity="0.55">#FAF7F4 — Base</text>
+  </g>
+
+  <!-- Charcoal -->
+  <g transform="translate(1000, 140)">
+    <rect width="170" height="220" rx="14" fill="#1A1416"/>
+    <text x="14" y="240" font-size="13" font-weight="600" fill="#1A1416">Charcoal</text>
+    <text x="14" y="258" font-size="12" fill="#1A1416" opacity="0.55">#1A1416 — Text</text>
+  </g>
+</svg>

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Sparkles, LayoutDashboard, FolderOpen, Plus, Wand2, BookOpen,
+  Sparkles, LayoutDashboard, FolderOpen, Plus, Wand2, BookOpen, Palette,
   Settings, CreditCard, BarChart2, Gift, HelpCircle,
   ChevronLeft, ChevronRight, LogOut, Zap
 } from 'lucide-react';
@@ -20,6 +20,7 @@ const NAV_ITEMS: Array<{ href: string; label: string; icon: typeof Plus; highlig
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/create', label: 'Create Reel', icon: Plus, highlight: true },
   { href: '/story', label: 'Story Mode', icon: BookOpen, badge: 'NEW' },
+  { href: '/branding', label: 'Brand Kit', icon: Palette, badge: '🌸' },
   { href: '/projects', label: 'My Projects', icon: FolderOpen },
   { href: '/ai-studio', label: 'AI Studio', icon: Wand2 },
   { href: '/analytics', label: 'Analytics', icon: BarChart2 },
