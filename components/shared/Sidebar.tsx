@@ -20,6 +20,7 @@ const NAV_ITEMS: Array<{ href: string; label: string; icon: typeof Plus; highlig
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/create', label: 'Create Reel', icon: Plus, highlight: true },
   { href: '/story', label: 'Story Mode', icon: BookOpen, badge: 'NEW' },
+  { href: '/mascot-studio', label: 'Mascot Studio', icon: Sparkles, badge: '⚡ FREE' },
   { href: '/branding', label: 'Brand Kit', icon: Palette, badge: '🌸' },
   { href: '/projects', label: 'My Projects', icon: FolderOpen },
   { href: '/ai-studio', label: 'AI Studio', icon: Wand2 },
